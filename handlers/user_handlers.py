@@ -327,6 +327,9 @@ def setup_user_handlers(bot):
     @bot.message_handler(func=lambda m: m.text == "📊 Hisobim")
     def handle_account_info(message):
         try:
+            if not check_subscription(bot, message.from_user.id):
+                prompt_subscription(bot, message)
+                return
             user_id = message.from_user.id
             conn = sqlite3.connect('pul_yutish.db')
             cursor = conn.cursor()
@@ -401,4 +404,5 @@ def setup_user_handlers(bot):
             )
         except Exception as e:
             print(f"Error in handle_referal: {e}")
+
             bot.send_message(message.chat.id, "❌ Xato yuz berdi. Iltimos, qayta urinib ko'ring.")
