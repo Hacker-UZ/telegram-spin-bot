@@ -280,7 +280,8 @@ def setup_user_handlers(bot):
 
             if spins_left <= 0:
                 bot.answer_callback_query(call.id, "❌ Sizda aylantirish imkoniyati qolmadi!")
-                bot.send_message(call.message.chat.id, 
+                bot.send_message(call.message.chat.id,
+                    "❌ Sizda aylantirish imkoniyati qolmadi!\n\n"
                     "👥 Do'stlaringizni taklif qilib, yana aylantirish imkoniyatini oling!\n"
                     "Har bir do'stingizni taklif qilganingizda *500* so'm bonus va 1ta aylantirish imkoniyatini olasiz!\n\n",
                     parse_mode="Markdown"
@@ -360,14 +361,12 @@ def setup_user_handlers(bot):
                 f"🎯 Minimal pul yechish: {MIN_WITHDRAWAL} so'm"
             )
 
-            # Add an inline button for withdrawal if the balance is sufficient
-            keyboard = None
-            if balance >= MIN_WITHDRAWAL:
-                keyboard = types.InlineKeyboardMarkup()
-                withdraw_button = types.InlineKeyboardButton(
-                    text="💸 Pul yechish", callback_data="withdraw"
-                )
-                keyboard.add(withdraw_button)
+             # Add an inline button for withdrawal
+            keyboard = types.InlineKeyboardMarkup()
+            withdraw_button = types.InlineKeyboardButton(
+                text="💸 Pul yechish", callback_data="withdraw"
+            )
+            keyboard.add(withdraw_button)
 
             # Send the account information
             bot.send_message(
@@ -406,3 +405,4 @@ def setup_user_handlers(bot):
             print(f"Error in handle_referal: {e}")
 
             bot.send_message(message.chat.id, "❌ Xato yuz berdi. Iltimos, qayta urinib ko'ring.")
+
