@@ -30,7 +30,7 @@ def setup_payment_handler(bot, admin_id):
             call.message.chat.id,
             "💳 Pul yechish uchun quyidagi formatda ma'lumotlarni yuboring:\n\n"
             "8600123456789012\n"
-            "John Doe\n\n"
+            "Ism Familya\n\n"
             "1-qator: Karta raqami (faqat raqamlar)\n"
             "2-qator: Karta egasining ismi (lotin harflarida)"
         )
@@ -84,7 +84,7 @@ def setup_payment_handler(bot, admin_id):
                 f"❌ Xato: \n\n"
                 "Iltimos, ma'lumotlarni quyidagi formatda qayta yuboring:\n\n"
                 "8600123456789012\n"
-                "John Doe\n\n"
+                "Ism Familya\n\n"
                 "1-qator: Karta raqami\n"
                 "2-qator: Karta egasining ismi"
             )
@@ -171,31 +171,6 @@ def setup_payment_handler(bot, admin_id):
                 "Iltimos, qayta urinib ko'ring."
             )
 
-    def notify_admin(user_id, card_number, amount):
-        try:
-            conn = sqlite3.connect('pul_yutish.db')
-            cursor = conn.cursor()
-
-            # Fetch user details
-            cursor.execute("SELECT username, full_name FROM users WHERE user_id=?", (user_id,))
-            user_data = cursor.fetchone()
-            username = user_data[0] or "Noma'lum"
-            full_name = user_data[1] or "Noma'lum"
-
-            conn.close()
-
-            # Notify admin
-            bot.send_message(
-                admin_id,
-                f"🆕 Yangi to'lov so'rovi:\n\n"
-                f"👤 Foydalanuvchi: @{username} ({full_name})\n"
-                f"💰 Miqdor: {amount:,} so'm\n"
-                f"💳 Karta raqami: {card_number}\n"
-                f"📅 Sana: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
-            )
-        except Exception as e:
-            print(f"Error notifying admin: {e}")
-
     @bot.message_handler(func=lambda m: m.text == "💸 Pul yechish")
     def handle_withdrawal_request(message):
         user_id = message.from_user.id
@@ -263,4 +238,5 @@ def setup_payment_handler(bot, admin_id):
             except Exception as e:
                 bot.send_message(message.chat.id, f"❌ Telefon raqamini saqlashda xatolik yuz berdi: {str(e)}")
             finally:
+
                 conn.close()
