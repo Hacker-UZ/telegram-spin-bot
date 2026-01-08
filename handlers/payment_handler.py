@@ -3,6 +3,7 @@ from config import MIN_WITHDRAWAL, CURRENCY
 from database import get_user, update_user
 import sqlite3
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 def format_money(amount):
     return f"{amount:,} so'm"
@@ -13,9 +14,15 @@ def setup_payment_handler(bot, admin_id):
         user_id = call.from_user.id
         conn = sqlite3.connect('pul_yutish.db')
         cursor = conn.cursor()
-        cursor.execute("SELECT balance FROM users WHERE user_id=?", (user_id,))
-        balance = cursor.fetchone()[0]
+        cursor.execute("SELECT balance, phone_number FROM users WHERE user_id=?", (user_id,))
+        result = cursor.fetchone()
         conn.close()
+        
+        if not result:
+            bot.send_message(call.message.chat.id, "❌ Foydalanuvchi topilmadi!")
+            return
+        
+        balance, phone_number = result
 
         if balance < MIN_WITHDRAWAL:
             bot.send_message(
@@ -25,16 +32,13 @@ def setup_payment_handler(bot, admin_id):
             )
             return
 
-        # Aniq formatda so'rov yuboramiz
-        msg = bot.send_message(
-            call.message.chat.id,
-            "💳 Pul yechish uchun quyidagi formatda ma'lumotlarni yuboring:\n\n"
-            "8600123456789012\n"
-            "Ism Familya\n\n"
-            "1-qator: Karta raqami (faqat raqamlar)\n"
-            "2-qator: Karta egasining ismi (lotin harflarida)"
-        )
-        bot.register_next_step_handler(msg, process_payment_info, user_id, balance)
+        # Agar telefon raqami yo'q bo'lsa, avval so'raymiz
+        if not phone_number:
+            request_phone_number(call.message)
+            return
+
+        # Telefon raqami bor bo'lsa, karta ma'lumotlarini so'raymiz
+        proceed_to_payment_info(call.message, user_id, balance)
 
     def process_payment_info(message, user_id, amount):
         try:
@@ -58,7 +62,7 @@ def setup_payment_handler(bot, admin_id):
                             (user_id, card_number, card_holder, amount, request_date)
                             VALUES (?, ?, ?, ?, ?)''',
                          (user_id, card_number, card_holder, amount, 
-                          datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+                          datetime.now(ZoneInfo("Asia/Tashkent")).strftime("%Y-%m-%d %H:%M:%S")))
             
             # Balansni yangilash
             cursor.execute("UPDATE users SET balance=0 WHERE user_id=?", (user_id,))
@@ -109,7 +113,7 @@ def setup_payment_handler(bot, admin_id):
             f"💰 Miqdor: {format_money(amount)}\n"
             f"💳 Karta raqami: {card_number}\n"
             f"👤 Karta egasi: {card_holder}\n\n"
-            f"📅 Sana: {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+            f"📅 Sana: {datetime.now(ZoneInfo('Asia/Tashkent')).strftime('%Y-%m-%d %H:%M')}",
             reply_markup=keyboard
         )
 
@@ -144,9 +148,9 @@ def setup_payment_handler(bot, admin_id):
 
             # Insert withdrawal request into the database
             cursor.execute(
-                """INSERT INTO payments (user_idSuest_date, status)
+                """INSERT INTO payments (user_id, card_number, amount, request_date, status)
                    VALUES (?, ?, ?, ?, ?)""",
-                (user_id, card_number, balance, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), 'pending')
+                (user_id, card_number, balance, datetime.now(ZoneInfo('Asia/Tashkent')).strftime("%Y-%m-%d %H:%M:%S"), 'pending')
             )
 
             # Reset user balance
@@ -218,6 +222,17 @@ def setup_payment_handler(bot, admin_id):
             reply_markup=keyboard
         )
 
+    def proceed_to_payment_info(message, user_id, balance):
+        msg = bot.send_message(
+            message.chat.id,
+            "💳 Pul yechish uchun quyidagi formatda ma'lumotlarni yuboring:\n\n"
+            "8600123456789012\n"
+            "Ism Familya\n\n"
+            "1-qator: Karta raqami (faqat raqamlar)\n"
+            "2-qator: Karta egasining ismi (lotin harflarida)"
+        )
+        bot.register_next_step_handler(msg, process_payment_info, user_id, balance)
+
     @bot.message_handler(content_types=['contact'])
     def handle_contact(message):
         if message.contact:
@@ -228,15 +243,29 @@ def setup_payment_handler(bot, admin_id):
             cursor = conn.cursor()
 
             try:
-                # Save the phone number to the database
+                # Telefon raqamini bazaga saqlash
                 cursor.execute("UPDATE users SET phone_number=? WHERE user_id=?", (phone_number, user_id))
                 conn.commit()
 
-                # Notify the user
+                # Balansni olish
+                cursor.execute("SELECT balance FROM users WHERE user_id=?", (user_id,))
+                balance = cursor.fetchone()[0]
+
+                if balance < MIN_WITHDRAWAL:
+                    bot.send_message(
+                        message.chat.id,
+                        f"❌ Pul yechish uchun minimal balans: {format_money(MIN_WITHDRAWAL)}\n"
+                        f"Sizning balansingiz: {format_money(balance)}"
+                    )
+                    conn.close()
+                    return
+
+                # Muvaffaqiyatlik xabari
                 bot.send_message(message.chat.id, "✅ Telefon raqamingiz saqlandi!")
-                handle_withdrawal_request(message)  # Retry withdrawal process
+                
+                # Karta ma'lumotlarini so'ramiz
+                proceed_to_payment_info(message, user_id, balance)
             except Exception as e:
                 bot.send_message(message.chat.id, f"❌ Telefon raqamini saqlashda xatolik yuz berdi: {str(e)}")
             finally:
-
                 conn.close()

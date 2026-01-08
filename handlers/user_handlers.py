@@ -91,10 +91,11 @@ def setup_user_handlers(bot):
                 # Add new user or reinitialize blocked user with initial spins
                 cursor.execute(
                     """INSERT OR REPLACE INTO users 
-                       (user_id, username, full_name, spins_left, balance) 
-                       VALUES (?, ?, ?, ?, ?)""",
+                       (user_id, username, full_name, spins_left, balance, created_at) 
+                       VALUES (?, ?, ?, ?, ?, ?)""",
                     (user_id, message.from_user.username or "", 
-                     message.from_user.full_name or "", INITIAL_SPINS, 0)
+                     message.from_user.full_name or "", INITIAL_SPINS, 0,
+                     datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
                 )
                 conn.commit()
 

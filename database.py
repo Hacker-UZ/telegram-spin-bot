@@ -94,6 +94,12 @@ def init_db():
     if "bonus_given" not in columns:
         cursor.execute("ALTER TABLE referals ADD COLUMN bonus_given INTEGER DEFAULT 0")
 
+    # Add created_at column to users table if it doesn't exist
+    cursor.execute("PRAGMA table_info(users)")
+    columns = [column[1] for column in cursor.fetchall()]
+    if "created_at" not in columns:
+        cursor.execute("ALTER TABLE users ADD COLUMN created_at TEXT")
+
     # Set default ACTIVE_PRIZES if not already set
     cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('ACTIVE_PRIZES', 'PRIZES')")
 
