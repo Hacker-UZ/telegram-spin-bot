@@ -5,8 +5,8 @@ import telebot
 from telebot.apihelper import ApiTelegramException
 import os
 from telebot.types import Message
-import xlsxwriter  # For exporting to Excel
-from config import MIN_WITHDRAWAL, INITIAL_SPINS, REFERAL_SPINS, REFERAL_BONUS, PRIZES, ADMIN_ID
+import xlsxwriter 
+from config import MIN_WITHDRAWAL, INITIAL_SPINS, REFERAL_SPINS, PRIZES, ADMIN_ID
 
 def format_money(amount):
     return f"{amount:,} so'm"

@@ -10,13 +10,10 @@ from keep_alive import keep_alive
 keep_alive()
 
 def main():
-    # Enable middleware
     apihelper.ENABLE_MIDDLEWARE = True
 
-    # Ma'lumotlar bazasini ishga tushirish
     init_db()
-    
-    # Initialize the bot
+
     bot = telebot.TeleBot(BOT_TOKEN)
     setup_user_handlers(bot)
     setup_payment_handler(bot, ADMIN_ID)
@@ -24,13 +21,12 @@ def main():
     
     print("Bot ishga tushdi...")
 
-    # Retry mechanism for infinity_polling
     while True:
         try:
             bot.infinity_polling(timeout=20, long_polling_timeout=10)
         except Exception as e:
             print(f"Bot polling error: {e}")
-            time.sleep(5)  # Wait before retrying
+            time.sleep(5)
 
 if __name__ == '__main__':
     main()

@@ -1,7 +1,7 @@
 from telebot import types
 from datetime import datetime
 import sqlite3
-from config import INITIAL_SPINS, MIN_WITHDRAWAL, ADMIN_ID, PRIZES, REFERAL_SPINS, REFERAL_BONUS
+from config import INITIAL_SPINS, MIN_WITHDRAWAL, ADMIN_ID, PRIZES_LOW_BALANCE, PRIZES_HIGH_BALANCE, REFERAL_SPINS
 import random
 
 def setup_user_handlers(bot):
@@ -118,8 +118,8 @@ def setup_user_handlers(bot):
                 if not bonus_given:  # Only give the bonus if it hasn't been given yet
                     # Add bonuses to the referral owner
                     cursor.execute(
-                        "UPDATE users SET spins_left=spins_left+?, balance=balance+? WHERE user_id=?",
-                        (REFERAL_SPINS, REFERAL_BONUS, referer_id)
+                        "UPDATE users SET spins_left=spins_left+? WHERE user_id=?",
+                        (REFERAL_SPINS, referer_id)
                     )
                     # Mark the bonus as given
                     cursor.execute(
@@ -133,7 +133,7 @@ def setup_user_handlers(bot):
                     bot.send_message(
                         referer_id,
                         f"🎉 Sizning referalingiz {referred_user_name} kanallarga obuna bo'ldi!\n"
-                        f"Sizga *{REFERAL_BONUS}* so'm bonus va *{REFERAL_SPINS}* aylantirish imkoniyati berildi!",
+                        f"Sizga *{REFERAL_SPINS}* aylantirish imkoniyati berildi!",
                         parse_mode="Markdown"
                     )
 
@@ -232,8 +232,7 @@ def setup_user_handlers(bot):
                 message.chat.id,
                 f"🎰 *Pul Yutish Botiga xush kelibsiz!*\n\n"
                 f"💵 Balans: {balance:,} so'm\n"
-                f"🎡 Aylantirishlar: {spins_left}\n\n"
-                f"Har bir do'stingizni taklif qilganingizda *500* so'm bonus olasiz!",
+                f"🎡 Aylantirishlar: {spins_left}\n\n",
                 reply_markup=keyboard,
                 parse_mode="Markdown"
             )
@@ -283,8 +282,7 @@ def setup_user_handlers(bot):
                 bot.answer_callback_query(call.id, "❌ Sizda aylantirish imkoniyati qolmadi!")
                 bot.send_message(call.message.chat.id,
                     "❌ Sizda aylantirish imkoniyati qolmadi!\n\n"
-                    "👥 Do'stlaringizni taklif qilib, yana aylantirish imkoniyatini oling!\n"
-                    "Har bir do'stingizni taklif qilganingizda *500* so'm bonus va 1ta aylantirish imkoniyatini olasiz!\n\n",
+                    "👥 Do'stlaringizni taklif qilib, yana 1ta aylantirish imkoniyatini oling!\n",
                     parse_mode="Markdown"
                 )
                 return
@@ -297,8 +295,12 @@ def setup_user_handlers(bot):
             import time
             time.sleep(1.2)
 
-            # Select a random prize
-            prize = random.choice(PRIZES)
+            # Balansga qarab yutuqlarni tanlash
+            if balance >= 18000:
+                prize = random.choice(PRIZES_HIGH_BALANCE)
+            else:
+                prize = random.choice(PRIZES_LOW_BALANCE)
+            
             new_balance = balance + prize
             new_spins = spins_left - 1
 
@@ -314,13 +316,22 @@ def setup_user_handlers(bot):
             conn.commit()
 
             # Send the prize message
-            bot.send_message(
-                call.message.chat.id,
-                f"🎉 Tabriklaymiz! Siz yutdingiz: *{prize:,} so'm*!\n\n"
-                f"💵 Yangi balans: {new_balance:,} so'm\n"
-                f"🎡 Qolgan aylantirishlar: {new_spins}",
-                parse_mode="Markdown"
-            )
+            if prize == 0:
+                bot.send_message(
+                    call.message.chat.id,
+                    f"😔 Afsuski, siz bu safar yutmadingiz!\n\n"
+                    f"💵 Balans: {new_balance:,} so'm\n"
+                    f"🎡 Qolgan aylantirishlar: {new_spins}",
+                    parse_mode="Markdown"
+                )
+            else:
+                bot.send_message(
+                    call.message.chat.id,
+                    f"🎉 Tabriklaymiz! Siz yutdingiz: *{prize:,} so'm*!\n\n"
+                    f"💵 Yangi balans: {new_balance:,} so'm\n"
+                    f"🎡 Qolgan aylantirishlar: {new_spins}",
+                    parse_mode="Markdown"
+                )
         except Exception as e:
             bot.send_message(call.message.chat.id, f"❌ Xato yuz berdi: {str(e)}")
         finally:
@@ -391,19 +402,30 @@ def setup_user_handlers(bot):
             bot.send_message(
                 message.chat.id,
                 f"<b>💁‍♂ Yana bepul baraban aylantirishni istaysizmi?</b>\n\n"
-                f"<b>👤 Har bir taklif qilingan kishi sizga 1️⃣ marotaba baraban aylantirish imkonini beradi.</b>\n\n"
-                f"<b>💸 Bundan tashqari har bir taklif qilgan kishi uchun biz 500 soʻmdan toʻlaymiz.</b>\n",
+                f"<b>👤 Har bir taklif qilingan do'stingiz 1️⃣ marotaba baraban aylantirish imkonini beradi.</b>\n\n",
                 parse_mode="HTML"
             )
+            
+            bot_username = bot.get_me().username
+            referral_link = f"https://t.me/{bot_username}?start=ref{user_id}"
+            share_text = "📯 Baraban aylantirib pul ishlash vaqti keldi!\nHammasi 💯 foiz ishonchli"
+            
+            keyboard = types.InlineKeyboardMarkup()
+            btn_share = types.InlineKeyboardButton(
+                "📤 Do'stlarga yuborish", 
+                url=f"https://t.me/share/url?text={share_text}&url={referral_link}\n"
+            )
+            keyboard.add(btn_share)
+            
             bot.send_message(
                 message.chat.id,
-                f"<b>📯 Baraban aylantirib pul ishlash vaqti keldi!</b>\n\n"
-                f"Baraban aylantir | Pul ishla! [Bot] da Baraban aylantirib pul ishlang\n\n"
-                f"https://t.me/{bot.get_me().username}?start=ref{user_id}\n\n",
-                parse_mode="HTML"
+                f"<b>🔗 Sizning referalingiz:</b>\n\n"
+                f"<code>{referral_link}</code>\n\n"
+                f"<b>Ushbu linkni do'stlaringizga yuboring va bonus oling!</b>",
+                parse_mode="HTML",
+                reply_markup=keyboard
             )
         except Exception as e:
             print(f"Error in handle_referal: {e}")
-
             bot.send_message(message.chat.id, "❌ Xato yuz berdi. Iltimos, qayta urinib ko'ring.")
 

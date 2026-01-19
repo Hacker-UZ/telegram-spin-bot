@@ -101,6 +101,10 @@ def setup_payment_handler(bot, admin_id):
         cursor.execute("SELECT username, full_name FROM users WHERE user_id=?", (user_id,))
         username, full_name = cursor.fetchone()
         
+        cursor.execute("SELECT phone_number FROM users WHERE user_id=?", (user_id,))
+        phone_number = cursor.fetchone()[0]
+        conn.close()
+        
         keyboard = types.InlineKeyboardMarkup()
         btn_confirm = types.InlineKeyboardButton("✅ Tasdiqlash", callback_data=f"confirm_pay_{user_id}")
         btn_reject = types.InlineKeyboardButton("❌ Rad etish", callback_data=f"reject_pay_{user_id}")
@@ -110,6 +114,7 @@ def setup_payment_handler(bot, admin_id):
             admin_id,
             f"🆕 Yangi to'lov so'rovi:\n\n"
             f"👤 Foydalanuvchi: @{username} ({full_name})\n"
+            f"📱 Telefon: {phone_number}\n"
             f"💰 Miqdor: {format_money(amount)}\n"
             f"💳 Karta raqami: {card_number}\n"
             f"👤 Karta egasi: {card_holder}\n\n"
