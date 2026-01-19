@@ -402,28 +402,19 @@ def setup_user_handlers(bot):
             bot.send_message(
                 message.chat.id,
                 f"<b>💁‍♂ Yana bepul baraban aylantirishni istaysizmi?</b>\n\n"
-                f"<b>👤 Har bir taklif qilingan do'stingiz 1️⃣ marotaba baraban aylantirish imkonini beradi.</b>\n\n",
+                f"<b>👤 Har bir taklif qilingan do'stingiz 1️⃣ marotaba baraban aylantirish imkonini beradi.</b>\n"
+                f"<b>✈️ Referalingizni do'stlaringizga yuboring!</b>",
                 parse_mode="HTML"
             )
             
             bot_username = bot.get_me().username
             referral_link = f"https://t.me/{bot_username}?start=ref{user_id}"
-            share_text = "📯 Baraban aylantirib pul ishlash vaqti keldi!\nHammasi 💯 foiz ishonchli"
-            
-            keyboard = types.InlineKeyboardMarkup()
-            btn_share = types.InlineKeyboardButton(
-                "📤 Do'stlarga yuborish", 
-                url=f"https://t.me/share/url?text={share_text}&url={referral_link}\n"
-            )
-            keyboard.add(btn_share)
             
             bot.send_message(
                 message.chat.id,
-                f"<b>🔗 Sizning referalingiz:</b>\n\n"
-                f"<code>{referral_link}</code>\n\n"
-                f"<b>Ushbu linkni do'stlaringizga yuboring va bonus oling!</b>",
-                parse_mode="HTML",
-                reply_markup=keyboard
+                f"<b>📯 Baraban aylantir pul ishla!!!\n💸Hammasi 💯% ishonchli</b>\n\n"
+                f"<b>{referral_link}</b>\n\n",
+                parse_mode="HTML"
             )
         except Exception as e:
             print(f"Error in handle_referal: {e}")
