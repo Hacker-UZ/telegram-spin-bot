@@ -69,6 +69,10 @@ def setup_admin_handlers(bot_instance, admin_id):
             parse_mode="Markdown"
         )
 
+    @bot.message_handler(func=lambda m: m.text == "🔙 Qaytish" and m.from_user.id == admin_id)
+    def handle_channels_back(message):
+        handle_admin(message)
+
     @bot.message_handler(func=lambda m: m.text == "📊 Statistika" and m.from_user.id == admin_id)
     def show_stats(message):
         conn = sqlite3.connect('pul_yutish.db')
@@ -256,45 +260,6 @@ def setup_admin_handlers(bot_instance, admin_id):
             types.KeyboardButton("🔙 Qaytish")
         )
         bot.send_message(
-            message.chat.id,
-            "📢 *Majburiy kanallar boshqaruvi*",
-            reply_markup=keyboard,
-            parse_mode="Markdown"
-        )
-
-    @bot_instance.message_handler(func=lambda m: m.text == "🔙 Admin menyusi" and m.from_user.id == admin_id)
-    def back_to_admin_main_menu(message):
-        keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
-        keyboard.row(
-            types.KeyboardButton("📊 Statistika"),
-            types.KeyboardButton("💸 To'lov so'rovlari"),
-            types.KeyboardButton("📢 Kanallar")
-        )
-        keyboard.row(
-            types.KeyboardButton("🔙 Asosiy menyu")
-        )
-        
-        bot_instance.send_message(
-            message.chat.id,
-            "👑 *Admin paneli*",
-            reply_markup=keyboard,
-            parse_mode="Markdown"
-        )
-    
-    # Kanalar menyusini yaratishda tugmani qo'shamiz
-    @bot_instance.message_handler(func=lambda m: m.text == "📢 Kanallar" and m.from_user.id == admin_id)
-    def handle_channels_menu(message):
-        keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
-        keyboard.row(
-            types.KeyboardButton("➕ Kanal qo'shish"),
-            types.KeyboardButton("➖ Kanal olib tashlash")
-        )
-        keyboard.row(
-            types.KeyboardButton("📋 Kanallar ro'yxati"),
-            types.KeyboardButton("🔙 Qaytish")
-        )
-        
-        bot_instance.send_message(
             message.chat.id,
             "📢 *Majburiy kanallar boshqaruvi*",
             reply_markup=keyboard,
