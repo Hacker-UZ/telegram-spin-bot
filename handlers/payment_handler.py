@@ -105,11 +105,6 @@ def setup_payment_handler(bot, admin_id):
         phone_number = cursor.fetchone()[0]
         conn.close()
         
-        keyboard = types.InlineKeyboardMarkup()
-        btn_confirm = types.InlineKeyboardButton("✅ Tasdiqlash", callback_data=f"confirm_pay_{user_id}")
-        btn_reject = types.InlineKeyboardButton("❌ Rad etish", callback_data=f"reject_pay_{user_id}")
-        keyboard.add(btn_confirm, btn_reject)
-        
         bot.send_message(
             admin_id,
             f"🆕 Yangi to'lov so'rovi:\n\n"
@@ -118,8 +113,7 @@ def setup_payment_handler(bot, admin_id):
             f"💰 Miqdor: {format_money(amount)}\n"
             f"💳 Karta raqami: {card_number}\n"
             f"👤 Karta egasi: {card_holder}\n\n"
-            f"📅 Sana: {datetime.now(ZoneInfo('Asia/Tashkent')).strftime('%Y-%m-%d %H:%M')}",
-            reply_markup=keyboard
+            f"📅 Sana: {datetime.now(ZoneInfo('Asia/Tashkent')).strftime('%Y-%m-%d %H:%M')}"
         )
 
     def process_withdrawal_request(message):

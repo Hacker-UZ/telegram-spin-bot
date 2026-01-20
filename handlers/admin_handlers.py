@@ -52,7 +52,7 @@ def setup_admin_handlers(bot_instance, admin_id):
         btn3 = types.KeyboardButton("📢 Kanallar")
         btn4 = types.KeyboardButton("👥 Foydalanuvchilar")
         btn6 = types.KeyboardButton("📢 Xabar yuborish")
-        btn7 = types.KeyboardButton("🚫 Foydalanuvchini bloklash")
+        btn7 = types.KeyboardButton("🔄 Hisobni 0 qilish")
         btn9 = types.KeyboardButton("🎁 Bonus berish")
         btn10 = types.KeyboardButton("➕ Kanalni aktivlashtirish")
         btn8 = types.KeyboardButton("🔙 Asosiy menyu")
@@ -209,7 +209,7 @@ def setup_admin_handlers(bot_instance, admin_id):
         conn = sqlite3.connect('pul_yutish.db')
         cursor = conn.cursor()
 
-        cursor.execute('''SELECT p.id, u.username, p.card_number, p.card_holder, p.amount, p.request_date 
+        cursor.execute('''SELECT p.id, u.username, u.phone_number, p.card_number, p.card_holder, p.amount, p.request_date 
                         FROM payments p
                         JOIN users u ON p.user_id = u.user_id
                         WHERE p.status='pending'
@@ -222,7 +222,7 @@ def setup_admin_handlers(bot_instance, admin_id):
             return
 
         for req in requests:
-            req_id, username, card_number, card_holder, amount, req_date = req
+            req_id, username, phone_number, card_number, card_holder, amount, req_date = req
 
             # Karta raqamini yashirib ko'rsatamiz
             masked_card = f"**** **** **** {card_number[-4:]}" if card_number and len(card_number) >= 4 else "Noma'lum"
@@ -236,6 +236,7 @@ def setup_admin_handlers(bot_instance, admin_id):
                 message.chat.id,
                 f"🆔 So'rov ID: {req_id}\n"
                 f"👤 Foydalanuvchi: @{username}\n"
+                f"📱 Telefon: {phone_number}\n"
                 f"💰 Miqdor: {format_money(amount)}\n"
                 f"💳 Karta raqami: {card_number}\n"
                 f"👤 Karta egasi: {card_holder}\n"
@@ -433,45 +434,6 @@ def setup_admin_handlers(bot_instance, admin_id):
             # Optionally log the error or notify the admin
             print(error_message)
 
-    @bot.message_handler(func=lambda m: m.text == "💸 To'lov so'rovlari" and m.from_user.id == admin_id)
-    def show_payment_requests(message):
-        try:
-            conn = sqlite3.connect('pul_yutish.db')
-            cursor = conn.cursor()
-            
-            cursor.execute('''SELECT p.id, u.username, p.card_holder, p.amount, p.request_date 
-                            FROM payments p
-                            JOIN users u ON p.user_id = u.user_id
-                            WHERE p.status='pending'
-                            ORDER BY p.request_date DESC''')
-            requests = cursor.fetchall()
-            conn.close()
-            
-            if not requests:
-                bot.send_message(message.chat.id, "⏳ Hozircha yangi to'lov so'rovlari mavjud emas.")
-                return
-            
-            for req in requests:
-                req_id, username, card_holder, card_number, amount, req_date = req
-                
-                keyboard = types.InlineKeyboardMarkup()
-                btn_confirm = types.InlineKeyboardButton("✅ Tasdiqlash", callback_data=f"confirm_pay_{req_id}")
-                btn_reject = types.InlineKeyboardButton("❌ Rad etish", callback_data=f"reject_pay_{req_id}")
-                keyboard.add(btn_confirm, btn_reject)
-                
-                bot.send_message(
-                    message.chat.id,
-                    f"🆔 So'rov ID: {req_id}\n"
-                    f"👤 Foydalanuvchi: @{username}\n"
-                    f"💳 Karta raqami: {card_number}\n"
-                    f"👤 Karta egasi: {card_holder}\n"
-                    f"💰 Miqdor: {format_money(amount)}\n"
-                    f"📅 Sana: {req_date}",
-                    reply_markup=keyboard
-                )
-        except Exception as e:
-            print(f"Show payment requests error: {e}")
-
     @bot.callback_query_handler(func=lambda call: call.data.startswith(('confirm_pay_', 'reject_pay_')))
     def handle_payment_decision(call):
         if call.from_user.id != admin_id:
@@ -495,6 +457,28 @@ def setup_admin_handlers(bot_instance, admin_id):
 
             if call.data.startswith('confirm_pay_'):
                 cursor.execute("UPDATE payments SET status='completed' WHERE id=?", (req_id,))
+                
+                # Foydalanuvchi ma'lumotlarini olish
+                cursor.execute("SELECT username, full_name FROM users WHERE user_id=?", (user_id,))
+                user_data = cursor.fetchone()
+                username = user_data[0] if user_data else "Noma'lum"
+                full_name = user_data[1] if user_data else "Noma'lum"
+                
+                # Adminga isbot xabari yuborish
+                proof_message = (
+                    f"✅ To'lov tasdiqlandi\n\n"
+                    f"👤 Foydalanuvchi: @{username}\n"
+                    f"📝 Ism: {full_name}\n"
+                    f"🆔 ID: {user_id}\n"
+                    f"💰 Miqdor: {format_money(amount)}\n"
+                    f"📅 Sana: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                )
+                
+                try:
+                    bot.send_message(admin_id, proof_message)
+                except Exception as e:
+                    print(f"Admin xabari yuborish xatosi: {e}")
+                
                 bot.answer_callback_query(call.id, "✅ To'lov tasdiqlandi!")
                 bot.send_message(
                     user_id,
@@ -655,7 +639,7 @@ def setup_admin_handlers(bot_instance, admin_id):
         return text
 
     @bot.message_handler(func=lambda m: m.text == "👥 Foydalanuvchilar" and m.from_user.id == admin_id)
-    def handle_users_list(message, page=1):
+    def handle_users_list(message, page=1, sort_by="recent"):
         conn = sqlite3.connect('pul_yutish.db')
         cursor = conn.cursor()
 
@@ -668,8 +652,16 @@ def setup_admin_handlers(bot_instance, admin_id):
         offset = (page - 1) * users_per_page
         total_pages = (total_users + users_per_page - 1) // users_per_page
 
-        # Fetch users for the current page, including total withdrawn amount
-        cursor.execute("""
+        # Determine sort order
+        if sort_by == "earned":
+            order_by = "ORDER BY (SELECT SUM(amount) FROM prizes WHERE user_id = u.user_id) DESC"
+        elif sort_by == "withdrawn":
+            order_by = "ORDER BY (SELECT SUM(amount) FROM payments WHERE user_id = u.user_id AND status = 'completed') DESC"
+        else:  # recent
+            order_by = "ORDER BY u.created_at DESC"
+
+        # Fetch users for the current page
+        query = f"""
             SELECT 
                 u.user_id, 
                 u.full_name, 
@@ -681,8 +673,10 @@ def setup_admin_handlers(bot_instance, admin_id):
                 (SELECT SUM(amount) FROM payments WHERE user_id = u.user_id AND status = 'completed') AS total_withdrawn,
                 (SELECT ru.full_name FROM referals r JOIN users ru ON r.referer_id = ru.user_id WHERE r.referee_id = u.user_id LIMIT 1) AS referred_by
             FROM users u
+            {order_by}
             LIMIT ? OFFSET ?
-        """, (users_per_page, offset))
+        """
+        cursor.execute(query, (users_per_page, offset))
         users = cursor.fetchall()
         conn.close()
 
@@ -700,20 +694,45 @@ def setup_admin_handlers(bot_instance, admin_id):
                 f"📱 Telefon: {escape_markdown(phone_number or 'Unknown')}\n"
                 f"💰 Balans: {format_money(balance)}\n"
                 f"🤝 Referallar: {referral_count}\n"
-                f"💸 Yechib olingan summa: {format_money(total_withdrawn or 0)}\n"
+                f"💸 Yechib olingan: {format_money(total_withdrawn or 0)}\n"
                 f"📅 Qo'shilgan: {created_at or 'Unknown'}\n"
                 f"{referred_by_text}\n\n"
             )
 
-        # Inline keyboard for pagination and Excel download
+        # Inline keyboard for filters, pagination and Excel download
         keyboard = types.InlineKeyboardMarkup()
+        
+        # Filter buttons
+        filter_row = []
+        filter_row.append(types.InlineKeyboardButton("📅 Oxirgi", callback_data=f"users_filter_recent_{page}"))
+        filter_row.append(types.InlineKeyboardButton("💰 Ko'p pul", callback_data=f"users_filter_earned_{page}"))
+        filter_row.append(types.InlineKeyboardButton("💸 Yechib olingan", callback_data=f"users_filter_withdrawn_{page}"))
+        keyboard.row(*filter_row)
+        
+        # Pagination buttons
+        row = []
         if page > 1:
-            keyboard.add(types.InlineKeyboardButton("⬅️ Oldingi", callback_data=f"users_page_{page - 1}"))
+            row.append(types.InlineKeyboardButton("⬅️ Oldingi", callback_data=f"users_page_{page - 1}_{sort_by}"))
         if page < total_pages:
-            keyboard.add(types.InlineKeyboardButton("Keyingi ➡️", callback_data=f"users_page_{page + 1}"))
+            row.append(types.InlineKeyboardButton("Keyingi ➡️", callback_data=f"users_page_{page + 1}_{sort_by}"))
+        if row:
+            keyboard.row(*row)
         keyboard.add(types.InlineKeyboardButton("📥 Excel ro'yxat", callback_data="download_users_excel"))
 
         bot.send_message(message.chat.id, response, parse_mode="Markdown", reply_markup=keyboard)
+
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("users_filter_"))
+    def handle_users_filter(call):
+        if call.from_user.id != admin_id:
+            bot.answer_callback_query(call.id, "❌ Sizga ruxsat yo'q!")
+            return
+
+        parts = call.data.split('_')
+        filter_type = parts[2]  # recent, earned, withdrawn
+        page = int(parts[3]) if len(parts) > 3 else 1
+        
+        bot.delete_message(call.message.chat.id, call.message.message_id)
+        handle_users_list(call.message, page, filter_type)
 
     @bot.callback_query_handler(func=lambda call: call.data.startswith("users_page_"))
     def handle_users_pagination(call):
@@ -721,10 +740,13 @@ def setup_admin_handlers(bot_instance, admin_id):
             bot.answer_callback_query(call.id, "❌ Sizga ruxsat yo'q!")
             return
 
-        # Extract the page number from the callback data
-        page = int(call.data.split("_")[-1])
+        # Extract the page number and sort_by from the callback data
+        parts = call.data.split('_')
+        page = int(parts[2])
+        sort_by = parts[3] if len(parts) > 3 else "recent"
+        
         bot.delete_message(call.message.chat.id, call.message.message_id)
-        handle_users_list(call.message, page)
+        handle_users_list(call.message, page, sort_by)
 
     @bot.callback_query_handler(func=lambda call: call.data == "download_users_excel")
     def handle_download_users_excel(call):
@@ -780,27 +802,31 @@ def setup_admin_handlers(bot_instance, admin_id):
 
         bot.answer_callback_query(call.id, "📥 Excel fayl tayyor!")
 
-    @bot.message_handler(func=lambda m: m.text == "🚫 Foydalanuvchini bloklash" and m.from_user.id == admin_id)
-    def handle_block_user(message):
+    @bot.message_handler(func=lambda m: m.text == "🔄 Hisobni 0 qilish" and m.from_user.id == admin_id)
+    def handle_reset_user_balance(message):
         keyboard = types.InlineKeyboardMarkup()
-        btn_cancel = types.InlineKeyboardButton("❌ Bekor qilish", callback_data="cancel_block_input")
+        btn_cancel = types.InlineKeyboardButton("❌ Bekor qilish", callback_data="cancel_reset_input")
         keyboard.add(btn_cancel)
         
         msg = bot.send_message(
             message.chat.id,
-            "❗ID sini yuboring:",
+            "❗ Foydalanuvchi ID sini yuboring:",
             reply_markup=keyboard
         )
-        bot.register_next_step_handler(msg, process_block_user)
+        bot.register_next_step_handler(msg, process_reset_user_balance)
 
-    def process_block_user(message):
+    def process_reset_user_balance(message):
         try:
+            # Check if cancel button was clicked
+            if message.text and message.text.startswith('/'):
+                return
+            
             user_id = int(message.text.strip())
             conn = sqlite3.connect('pul_yutish.db')
             cursor = conn.cursor()
 
             # Check if the user exists
-            cursor.execute("SELECT * FROM users WHERE user_id=?", (user_id,))
+            cursor.execute("SELECT full_name, balance FROM users WHERE user_id=?", (user_id,))
             user = cursor.fetchone()
 
             if not user:
@@ -811,21 +837,27 @@ def setup_admin_handlers(bot_instance, admin_id):
                 conn.close()
                 return
 
-            # Delete user data from all related tables
-            cursor.execute("DELETE FROM users WHERE user_id=?", (user_id,))
-            cursor.execute("DELETE FROM referals WHERE referer_id=? OR referee_id=?", (user_id, user_id))
-            cursor.execute("DELETE FROM prizes WHERE user_id=?", (user_id,))
-            cursor.execute("DELETE FROM payments WHERE user_id=?", (user_id,))
-            cursor.execute("DELETE FROM user_subscriptions WHERE user_id=?", (user_id,))
-            cursor.execute("DELETE FROM temp_data WHERE user_id=?", (user_id,))
-
-            conn.commit()
-            conn.close()
-
+            full_name, current_balance = user
+            
+            # Inline tugmalar tasdiqlash uchun
+            keyboard = types.InlineKeyboardMarkup()
+            btn_confirm = types.InlineKeyboardButton("✅ Tasdiqlash", callback_data=f"confirm_reset_{user_id}")
+            btn_cancel = types.InlineKeyboardButton("❌ Bekor qilish", callback_data="cancel_reset")
+            keyboard.add(btn_confirm, btn_cancel)
+            
             bot.send_message(
                 message.chat.id,
-                f"✅ Foydalanuvchi ID: {user_id} muvaffaqiyatli bloklandi va barcha ma'lumotlari o'chirildi."
+                f"⚠️ *Hisobni 0 qilish tasdiqlash:*\n\n"
+                f"👤 Foydalanuvchi: {full_name}\n"
+                f"🆔 ID: {user_id}\n"
+                f"💰 Joriy balans: {format_money(current_balance)}\n"
+                f"🔄 Yangi balans: 0 so'm\n\n"
+                f"❗ Bu amalni bekor qilib bo'lmaydi!",
+                reply_markup=keyboard,
+                parse_mode="Markdown"
             )
+            conn.close()
+            
         except ValueError:
             bot.send_message(
                 message.chat.id,
@@ -837,24 +869,71 @@ def setup_admin_handlers(bot_instance, admin_id):
                 f"❌ Xato yuz berdi: {str(e)}"
             )
 
-    @bot.callback_query_handler(func=lambda call: call.data == "cancel_block_input")
-    def handle_cancel_block_input(call):
+    @bot.callback_query_handler(func=lambda call: call.data.startswith('confirm_reset_'))
+    def handle_confirm_reset(call):
+        if call.from_user.id != admin_id:
+            bot.answer_callback_query(call.id, "❌ Sizga ruxsat yo'q!")
+            return
+        
+        try:
+            user_id = int(call.data.split('_')[-1])
+            conn = sqlite3.connect('pul_yutish.db')
+            cursor = conn.cursor()
+            
+            # Reset user balance to 0
+            cursor.execute(
+                "UPDATE users SET balance=0 WHERE user_id=?",
+                (user_id,)
+            )
+            conn.commit()
+            conn.close()
+            
+            # Send notification to user
+            bot.send_message(
+                user_id,
+                f"⚠️ *Hisobingiz qayta tiklandi*\n\n"
+                f"💰 Balans: 0 so'm"
+            )
+            
+            # Notify admin
+            bot.edit_message_text(
+                chat_id=call.message.chat.id,
+                message_id=call.message.message_id,
+                text=f"✅ Foydalanuvchi ID: {user_id} ning hisobi 0 qilinidi!",
+                reply_markup=None
+            )
+            bot.answer_callback_query(call.id, "✅ Balans 0 qilinidi!")
+            
+        except Exception as e:
+            bot.answer_callback_query(call.id, f"❌ Xato: {str(e)}")
+            print(f"Reset balance error: {e}")
+
+    @bot.callback_query_handler(func=lambda call: call.data == "cancel_reset_input")
+    def handle_cancel_reset_input(call):
         if call.from_user.id == admin_id:
             bot.edit_message_text(
                 chat_id=call.message.chat.id,
                 message_id=call.message.message_id,
-                text="❌ Foydalanuvchini bloklash bekor qilindi.",
+                text="❌ Hisobni 0 qilish bekor qilindi.",
                 reply_markup=None
             )
             bot.answer_callback_query(call.id, "Bekor qilindi!")
-            # Next step handler ni to'xtatish
             bot.clear_step_handler_by_chat_id(call.message.chat.id)
         else:
             bot.answer_callback_query(call.id, "❌ Sizga ruxsat yo'q!")
 
-    @bot.message_handler(func=lambda m: m.text == "🔙 Qaytish" and m.from_user.id == admin_id)
-    def handle_back_to_admin_menu(message):
-        handle_admin(message)
+    @bot.callback_query_handler(func=lambda call: call.data == "cancel_reset")
+    def handle_cancel_reset(call):
+        if call.from_user.id == admin_id:
+            bot.edit_message_text(
+                chat_id=call.message.chat.id,
+                message_id=call.message.message_id,
+                text="❌ Hisobni 0 qilish bekor qilindi.",
+                reply_markup=None
+            )
+            bot.answer_callback_query(call.id, "Bekor qilindi!")
+        else:
+            bot.answer_callback_query(call.id, "❌ Sizga ruxsat yo'q!")
 
     @bot.message_handler(func=lambda m: m.text == "🎁 Bonus berish" and m.from_user.id == admin_id)
     def handle_give_bonus(message):
