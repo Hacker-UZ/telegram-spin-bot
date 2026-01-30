@@ -100,6 +100,13 @@ def init_db():
     if "created_at" not in columns:
         cursor.execute("ALTER TABLE users ADD COLUMN created_at TEXT")
 
+    # Qora ro'yxat jadvali
+    cursor.execute('''CREATE TABLE IF NOT EXISTS blacklist
+                     (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                     user_id INTEGER UNIQUE,
+                     reason TEXT,
+                     added_date TEXT)''')
+
     # Set default ACTIVE_PRIZES if not already set
     cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('ACTIVE_PRIZES', 'PRIZES')")
 

@@ -1,7 +1,7 @@
 from telebot import types
 from datetime import datetime
 import sqlite3
-from config import INITIAL_SPINS, MIN_WITHDRAWAL, ADMIN_ID, PRIZES_LOW_BALANCE, PRIZES_HIGH_BALANCE, REFERAL_SPINS
+from config import INITIAL_SPINS, MIN_WITHDRAWAL, ADMIN_ID, PRIZES_LOW_BALANCE, PRIZES_HIGH_BALANCE, REFERAL_SPINS, PENALTY
 import random
 
 def setup_user_handlers(bot):
@@ -82,6 +82,13 @@ def setup_user_handlers(bot):
 
             conn = sqlite3.connect('pul_yutish.db')
             cursor = conn.cursor()
+
+            # Qora ro'yxatdan chiqarish tekshiruvi
+            cursor.execute("SELECT id FROM blacklist WHERE user_id=?", (user_id,))
+            if cursor.fetchone():
+                cursor.execute("DELETE FROM blacklist WHERE user_id=?", (user_id,))
+                conn.commit()
+                bot.send_message(user_id, "✅ Siz qora ro'yxatdan chiqarildi. Endi bota boshqa foydalana olasiz!")
 
             # Check if the user exists
             cursor.execute("SELECT spins_left FROM users WHERE user_id=?", (user_id,))
@@ -265,6 +272,12 @@ def setup_user_handlers(bot):
     def handle_spin(call):
         try:
             user_id = call.from_user.id
+            
+            # Subscription'ni tekshirish va jarima qo'llash
+            if not check_subscription_and_apply_penalty(bot, user_id):
+                bot.answer_callback_query(call.id, "⚠️ Kanallar tekshirildi!")
+                return
+            
             conn = sqlite3.connect('pul_yutish.db')
             cursor = conn.cursor()
 

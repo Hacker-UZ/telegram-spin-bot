@@ -12,6 +12,12 @@ def setup_payment_handler(bot, admin_id):
     @bot.callback_query_handler(func=lambda call: call.data == "withdraw")
     def handle_withdraw(call):
         user_id = call.from_user.id
+        
+        # Subscription tekshirish
+        if not check_subscription_and_apply_penalty(user_id):
+            bot.answer_callback_query(call.id, "⚠️ Kanallar tekshirildi!")
+            return
+        
         conn = sqlite3.connect('pul_yutish.db')
         cursor = conn.cursor()
         cursor.execute("SELECT balance, phone_number FROM users WHERE user_id=?", (user_id,))
