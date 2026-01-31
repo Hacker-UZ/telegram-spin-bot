@@ -105,7 +105,8 @@ def init_db():
                      (id INTEGER PRIMARY KEY AUTOINCREMENT,
                      user_id INTEGER UNIQUE,
                      reason TEXT,
-                     added_date TEXT)''')
+                     added_date TEXT,
+                     FOREIGN KEY(user_id) REFERENCES users(user_id))''')
 
     # Set default ACTIVE_PRIZES if not already set
     cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('ACTIVE_PRIZES', 'PRIZES')")

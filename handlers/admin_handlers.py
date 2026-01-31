@@ -6,7 +6,7 @@ from telebot.apihelper import ApiTelegramException
 import os
 from telebot.types import Message
 import xlsxwriter 
-from config import MIN_WITHDRAWAL, INITIAL_SPINS, REFERAL_SPINS, PRIZES, ADMIN_ID, PENALTY
+from config import MIN_WITHDRAWAL, INITIAL_SPINS, REFERAL_SPINS, PRIZES, ADMIN_ID
 
 def format_money(amount):
     return f"{amount:,} so'm"
@@ -55,14 +55,13 @@ def setup_admin_handlers(bot_instance, admin_id):
         btn7 = types.KeyboardButton("🔄 Hisobni 0 qilish")
         btn9 = types.KeyboardButton("🎁 Bonus berish")
         btn10 = types.KeyboardButton("➕ Kanalni aktivlashtirish")
-        btn11 = types.KeyboardButton("🔴 Qora ro'yxat")
-        btn12 = types.KeyboardButton("🔍 Kanal tekshiruvi")
+        btn11 = types.KeyboardButton("🚫 Qora ro'yxat")
         btn8 = types.KeyboardButton("🔙 Asosiy menyu")
         keyboard.row(btn1, btn2)
         keyboard.row(btn3, btn4)
         keyboard.row(btn6, btn7)
         keyboard.row(btn9, btn10)
-        keyboard.row(btn11, btn12)
+        keyboard.row(btn11)
         keyboard.row(btn8)
         
         bot.send_message(
@@ -90,14 +89,18 @@ def setup_admin_handlers(bot_instance, admin_id):
         cursor.execute("SELECT SUM(amount) FROM payments WHERE status='completed'")
         total_payout = cursor.fetchone()[0] or 0
         
-        cursor.execute("SELECT SUM(balance) FROM users")
-        total_balance = cursor.fetchone()[0] or 0
+        cursor.execute("SELECT SUM(amount) FROM prizes")
+        total_prizes = cursor.fetchone()[0] or 0
         
         cursor.execute("SELECT COUNT(*) FROM payments WHERE status='pending'")
         pending_payments = cursor.fetchone()[0]
         
         cursor.execute("SELECT COUNT(*) FROM channels")
         total_channels = cursor.fetchone()[0]
+        
+        # Jami foydalanuvchilar balansi
+        cursor.execute("SELECT SUM(balance) FROM users")
+        total_balance = cursor.fetchone()[0] or 0
         
         conn.close()
         
@@ -114,7 +117,7 @@ def setup_admin_handlers(bot_instance, admin_id):
             f"👥 Jami foydalanuvchilar: {total_users}\n"
             f"🤝 Jami referallar: {total_referals}\n"
             f"📢 Jami kanallar: {total_channels}\n"
-            f"💵 Barcha balans: {format_money(total_balance)}\n"
+            f"🎯 Jami yutqazilgan summa: {format_money(total_balance)}\n"
             f"💰 Jami to'langan summa: {format_money(total_payout)}\n"
             f"⏳ Ko'rib chiqilishi kerak bo'lgan to'lovlar: {pending_payments}\n\n"
             f"👥 *Foydalanuvchilar ma'lumoti:*",
@@ -187,6 +190,10 @@ def setup_admin_handlers(bot_instance, admin_id):
         cursor.execute("SELECT COUNT(*) FROM channels")
         total_channels = cursor.fetchone()[0]
         
+        # Jami foydalanuvchilar balansi
+        cursor.execute("SELECT SUM(balance) FROM users")
+        total_balance = cursor.fetchone()[0] or 0
+        
         conn.close()
         
         keyboard = types.InlineKeyboardMarkup()
@@ -202,7 +209,7 @@ def setup_admin_handlers(bot_instance, admin_id):
                  f"👥 Jami foydalanuvchilar: {total_users}\n"
                  f"🤝 Jami referallar: {total_referals}\n"
                  f"📢 Jami kanallar: {total_channels}\n"
-                 f"🎯 Jami yutqazilgan summa: {format_money(total_prizes)}\n"
+                 f"🎯 Jami yutqazilgan summa: {format_money(total_balance)}\n"
                  f"💰 Jami to'langan summa: {format_money(total_payout)}\n"
                  f"⏳ Ko'rib chiqilishi kerak bo'lgan to'lovlar: {pending_payments}\n\n"
                  f"👥 *Foydalanuvchilar ma'lumoti:*",
@@ -584,7 +591,7 @@ def setup_admin_handlers(bot_instance, admin_id):
 
         success_count = 0
         failure_count = 0
-        blacklisted_users = []
+        failed_user_ids = []
 
         for (user_id,) in users:
             try:
@@ -593,22 +600,21 @@ def setup_admin_handlers(bot_instance, admin_id):
             except Exception as e:
                 print(f"Failed to send message to {user_id}: {e}")
                 failure_count += 1
-                blacklisted_users.append(user_id)
+                failed_user_ids.append(user_id)
 
         # Yuborilmagan foydalanuvchilarni qora ro'yxatga qo'shish va balansni 0 qilish
-        if blacklisted_users:
+        if failed_user_ids:
             conn = sqlite3.connect('pul_yutish.db')
             cursor = conn.cursor()
             
-            for user_id in blacklisted_users:
-                # Balansni 0 qilish
-                cursor.execute("UPDATE users SET balance=0 WHERE user_id=?", (user_id,))
-                
+            for user_id in failed_user_ids:
                 # Qora ro'yxatga qo'shish
                 cursor.execute(
                     "INSERT OR IGNORE INTO blacklist (user_id, reason, added_date) VALUES (?, ?, ?)",
-                    (user_id, "Xabar yuborilmadi", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+                    (user_id, "Xabar yuborilmadi - bloklangan foydalanuvchi", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
                 )
+                # Balansni 0 qilish
+                cursor.execute("UPDATE users SET balance=0 WHERE user_id=?", (user_id,))
             
             conn.commit()
             conn.close()
@@ -617,7 +623,8 @@ def setup_admin_handlers(bot_instance, admin_id):
             message.chat.id,
             f"✅ Xabar muvaffaqiyatli yuborildi: {success_count} ta foydalanuvchiga.\n"
             f"❌ Xabar yuborilmadi: {failure_count} ta foydalanuvchiga.\n"
-            f"🔴 Qora ro'yxatga qo'shildi: {len(blacklisted_users)} ta"
+            f"🚫 Qora ro'yxatga qo'shilgan: {failure_count} ta\n"
+            f"💰 Balans 0 qilingan: {failure_count} ta"
         )
 
     def escape_markdown(text):
@@ -1103,193 +1110,169 @@ def setup_admin_handlers(bot_instance, admin_id):
                 f"❌ Xato yuz berdi: {str(e)}"
             )
 
-    @bot.message_handler(func=lambda m: m.text == "🔴 Qora ro'yxat" and m.from_user.id == admin_id)
-    def handle_blacklist(message):
+    @bot.message_handler(func=lambda m: m.text == "🚫 Qora ro'yxat" and m.from_user.id == admin_id)
+    def handle_blacklist(message, page=1):
         conn = sqlite3.connect('pul_yutish.db')
         cursor = conn.cursor()
         
-        cursor.execute("SELECT user_id, reason, added_date FROM blacklist")
-        blacklist_users = cursor.fetchall()
+        cursor.execute("SELECT COUNT(*) FROM blacklist")
+        total_count = cursor.fetchone()[0]
+        
+        if total_count == 0:
+            bot.send_message(message.chat.id, "✅ Qora ro'yxat bo'sh! Bloklangan foydalanuvchi yo'q.")
+            conn.close()
+            return
+        
+        # Pagingatsiya
+        items_per_page = 10
+        total_pages = (total_count + items_per_page - 1) // items_per_page
+        offset = (page - 1) * items_per_page
+        
+        cursor.execute(
+            "SELECT user_id, reason, added_date FROM blacklist ORDER BY added_date DESC LIMIT ? OFFSET ?",
+            (items_per_page, offset)
+        )
+        blacklisted_users = cursor.fetchall()
         conn.close()
         
-        if not blacklist_users:
-            keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
-            keyboard.add(types.KeyboardButton("🔙 Asosiy menyu"))
-            bot.send_message(
-                message.chat.id,
-                "📋 Qora ro'yxat bo'sh.",
-                reply_markup=keyboard
+        response = f"🚫 *Qora ro'yxat (Sahifa {page}/{total_pages}):*\n\n"
+        for i, (user_id, reason, added_date) in enumerate(blacklisted_users, 1):
+            response += (
+                f"{i}. 🆔 ID: {user_id}\n"
+                f"   📝 Sababi: {reason}\n"
+                f"   📅 Qo'shilgan: {added_date}\n\n"
             )
+        
+        # Tugmalar
+        keyboard = types.InlineKeyboardMarkup()
+        
+        # Pagingatsiya tugmalari
+        row = []
+        if page > 1:
+            row.append(types.InlineKeyboardButton("⬅️ Oldingi", callback_data=f"blacklist_page_{page - 1}"))
+        if page < total_pages:
+            row.append(types.InlineKeyboardButton("Keyingi ➡️", callback_data=f"blacklist_page_{page + 1}"))
+        if row:
+            keyboard.row(*row)
+        
+        # O'chirish tugmasi
+        keyboard.add(types.InlineKeyboardButton(
+            "🗑️ Hammasini o'chirish",
+            callback_data="clear_blacklist"
+        ))
+        
+        bot.send_message(message.chat.id, response, parse_mode="Markdown", reply_markup=keyboard)
+
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("blacklist_page_"))
+    def handle_blacklist_pagination(call):
+        if call.from_user.id != admin_id:
+            bot.answer_callback_query(call.id, "❌ Sizga ruxsat yo'q!")
             return
         
-        # Qora ro'yxat ro'yxatini ko'rsatish
-        blacklist_text = "🔴 *Qora ro'yxat:*\n\n"
-        for idx, (user_id, reason, added_date) in enumerate(blacklist_users, 1):
-            blacklist_text += f"{idx}. User ID: `{user_id}`\n   Sabab: {reason}\n   Vaqti: {added_date}\n\n"
+        page = int(call.data.split("_")[-1])
         
-        keyboard = types.InlineKeyboardMarkup()
-        btn_remove = types.InlineKeyboardButton("🗑️ O'chirish", callback_data="blacklist_remove")
-        btn_clear = types.InlineKeyboardButton("⚠️ Barchasini o'chirish", callback_data="blacklist_clear_all")
-        keyboard.row(btn_remove, btn_clear)
+        conn = sqlite3.connect('pul_yutish.db')
+        cursor = conn.cursor()
         
-        msg = bot.send_message(
-            message.chat.id,
-            blacklist_text,
-            reply_markup=keyboard,
-            parse_mode="Markdown"
+        cursor.execute("SELECT COUNT(*) FROM blacklist")
+        total_count = cursor.fetchone()[0]
+        
+        items_per_page = 10
+        total_pages = (total_count + items_per_page - 1) // items_per_page
+        offset = (page - 1) * items_per_page
+        
+        cursor.execute(
+            "SELECT user_id, reason, added_date FROM blacklist ORDER BY added_date DESC LIMIT ? OFFSET ?",
+            (items_per_page, offset)
         )
-
-    @bot.callback_query_handler(func=lambda call: call.data == "blacklist_remove")
-    def handle_blacklist_remove(call):
-        if call.from_user.id != admin_id:
-            bot.answer_callback_query(call.id, "❌ Sizga ruxsat yo'q!")
-            return
+        blacklisted_users = cursor.fetchall()
+        conn.close()
         
-        msg = bot.send_message(call.message.chat.id, "Qora ro'yxatdan o'chirish uchun User ID'ni kiriting:")
-        bot.register_next_step_handler(msg, process_blacklist_remove)
-
-    def process_blacklist_remove(message):
-        try:
-            user_id = int(message.text.strip())
-            conn = sqlite3.connect('pul_yutish.db')
-            cursor = conn.cursor()
-            
-            cursor.execute("DELETE FROM blacklist WHERE user_id=?", (user_id,))
-            conn.commit()
-            conn.close()
-            
-            bot.send_message(message.chat.id, f"✅ User ID {user_id} qora ro'yxatdan o'chirildi.")
-        except ValueError:
-            bot.send_message(message.chat.id, "❌ Noto'g'ri User ID formati!")
-        except Exception as e:
-            bot.send_message(message.chat.id, f"❌ Xato: {str(e)}")
-
-    @bot.callback_query_handler(func=lambda call: call.data == "blacklist_clear_all")
-    def handle_blacklist_clear_all(call):
-        if call.from_user.id != admin_id:
-            bot.answer_callback_query(call.id, "❌ Sizga ruxsat yo'q!")
-            return
+        response = f"🚫 *Qora ro'yxat (Sahifa {page}/{total_pages}):*\n\n"
+        for i, (user_id, reason, added_date) in enumerate(blacklisted_users, 1):
+            response += (
+                f"{i}. 🆔 ID: {user_id}\n"
+                f"   📝 Sababi: {reason}\n"
+                f"   📅 Qo'shilgan: {added_date}\n\n"
+            )
         
+        # Tugmalar
         keyboard = types.InlineKeyboardMarkup()
-        btn_yes = types.InlineKeyboardButton("✅ Ha", callback_data="blacklist_confirm_clear")
-        btn_no = types.InlineKeyboardButton("❌ Yo'q", callback_data="back_to_admin")
-        keyboard.row(btn_yes, btn_no)
+        
+        # Pagingatsiya tugmalari
+        row = []
+        if page > 1:
+            row.append(types.InlineKeyboardButton("⬅️ Oldingi", callback_data=f"blacklist_page_{page - 1}"))
+        if page < total_pages:
+            row.append(types.InlineKeyboardButton("Keyingi ➡️", callback_data=f"blacklist_page_{page + 1}"))
+        if row:
+            keyboard.row(*row)
+        
+        # O'chirish tugmasi
+        keyboard.add(types.InlineKeyboardButton(
+            "🗑️ Hammasini o'chirish",
+            callback_data="clear_blacklist"
+        ))
         
         bot.edit_message_text(
             chat_id=call.message.chat.id,
             message_id=call.message.message_id,
-            text="⚠️ Barcha qora ro'yxat ma'lumotlarini o'chirmoqchimisiz?",
+            text=response,
+            parse_mode="Markdown",
+            reply_markup=keyboard
+        )
+        bot.answer_callback_query(call.id)
+
+    @bot.callback_query_handler(func=lambda call: call.data == "clear_blacklist")
+    def handle_clear_blacklist(call):
+        if call.from_user.id != admin_id:
+            bot.answer_callback_query(call.id, "❌ Sizga ruxsat yo'q!")
+            return
+        
+        keyboard = types.InlineKeyboardMarkup()
+        btn_confirm = types.InlineKeyboardButton("✅ Ha, o'chirish", callback_data="confirm_clear_blacklist")
+        btn_cancel = types.InlineKeyboardButton("❌ Yo'q, bekor qilish", callback_data="cancel_clear_blacklist")
+        keyboard.add(btn_confirm, btn_cancel)
+        
+        bot.edit_message_text(
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            text="⚠️ Qora ro'yxatni to'liq o'chirmoqchi ekanizga ishonchsizmi?\n\nBu amalni bekor qilib bo'lmaydi!",
             reply_markup=keyboard
         )
 
-    @bot.callback_query_handler(func=lambda call: call.data == "blacklist_confirm_clear")
-    def handle_blacklist_confirm_clear(call):
+    @bot.callback_query_handler(func=lambda call: call.data == "confirm_clear_blacklist")
+    def handle_confirm_clear_blacklist(call):
         if call.from_user.id != admin_id:
             bot.answer_callback_query(call.id, "❌ Sizga ruxsat yo'q!")
             return
         
-        conn = sqlite3.connect('pul_yutish.db')
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM blacklist")
-        conn.commit()
-        conn.close()
-        
-        bot.edit_message_text(
-            chat_id=call.message.chat.id,
-            message_id=call.message.message_id,
-            text="✅ Qora ro'yxat tozalandi."
-        )
-
-    @bot.callback_query_handler(func=lambda call: call.data == "back_to_admin")
-    def handle_back_to_admin(call):
-        if call.from_user.id != admin_id:
-            bot.answer_callback_query(call.id, "❌ Sizga ruxsat yo'q!")
-            return
-        
-        bot.delete_message(call.message.chat.id, call.message.message_id)
-        handle_admin(call.message)
-
-    @bot.message_handler(func=lambda m: m.text == "🔍 Kanal tekshiruvi" and m.from_user.id == admin_id)
-    def handle_check_subscriptions(message):
-        conn = sqlite3.connect('pul_yutish.db')
-        cursor = conn.cursor()
-        
-        # Barcha kanallarni olish
-        cursor.execute("SELECT channel_id, channel_name FROM channels")
-        channels = cursor.fetchall()
-        
-        if not channels:
-            bot.send_message(message.chat.id, "📋 Kanallar ro'yxati bo'sh!")
+        try:
+            conn = sqlite3.connect('pul_yutish.db')
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM blacklist")
+            conn.commit()
             conn.close()
-            return
-        
-        # Barcha foydalanuvchilarni olish
-        cursor.execute("SELECT user_id FROM users")
-        users = cursor.fetchall()
-        conn.close()
-        
-        violations = []  # (user_id, unsubscribed_channels_count)
-        
-        for user_id, in users:
-            unsubscribed_count = 0
-            unsubscribed_names = []
             
-            for channel_id, channel_name in channels:
-                try:
-                    member = bot.get_chat_member(channel_id, user_id)
-                    if member.status not in ['member', 'administrator', 'creator']:
-                        unsubscribed_count += 1
-                        unsubscribed_names.append(channel_name)
-                except Exception as e:
-                    print(f"Error checking subscription for user {user_id} in channel {channel_id}: {e}")
-                    continue
-            
-            if unsubscribed_count > 0:
-                violations.append((user_id, unsubscribed_count, unsubscribed_names))
-        
-        if not violations:
-            bot.send_message(message.chat.id, "✅ Barcha foydalanuvchilar kanallarga obuna!")
-            return
-        
-        # Jarima qo'llash
-        conn = sqlite3.connect('pul_yutish.db')
-        cursor = conn.cursor()
-        
-        penalty_applied = 0
-        
-        for user_id, unsubscribed_count, unsubscribed_names in violations:
-            # Har bir kanal uchun 1000 so'm jarima
-            total_penalty = unsubscribed_count * PENALTY
-            
-            cursor.execute("SELECT balance FROM users WHERE user_id=?", (user_id,))
-            result = cursor.fetchone()
-            
-            if result:
-                current_balance = result[0]
-                new_balance = max(0, current_balance - total_penalty)
-                cursor.execute("UPDATE users SET balance=? WHERE user_id=?", (new_balance, user_id))
-                
-                # Xabar yuborish
-                channels_text = ", ".join(unsubscribed_names)
-                bot.send_message(
-                    user_id,
-                    f"⚠️ *Jarima qo'llanildi!*\n\n"
-                    f"Siz majburiy kanallardan chiqib ketdingiz:\n"
-                    f"📢 {channels_text}\n\n"
-                    f"💔 Jarima ({unsubscribed_count} kanal × {PENALTY:,} so'm): {total_penalty:,} so'm\n"
-                    f"Balans: {new_balance:,} so'm",
-                    parse_mode="Markdown"
-                )
-                penalty_applied += 1
-        
-        conn.commit()
-        conn.close()
-        
-        # Admin ga xabar
-        bot.send_message(
-            message.chat.id,
-            f"✅ Kanal tekshiruvi tugatildi!\n\n"
-            f"⚠️ Jarima qo'llangan foydalanuvchilar: {penalty_applied}\n"
-            f"📋 Jami qo'shilgan jarima: {sum([v[1] * PENALTY for v in violations]):,} so'm",
-            parse_mode="Markdown"
-        )
+            bot.edit_message_text(
+                chat_id=call.message.chat.id,
+                message_id=call.message.message_id,
+                text="✅ Qora ro'yxat o'chirildi!",
+                reply_markup=None
+            )
+            bot.answer_callback_query(call.id, "✅ Qora ro'yxat o'chirildi!")
+        except Exception as e:
+            bot.answer_callback_query(call.id, f"❌ Xato: {str(e)}")
+
+    @bot.callback_query_handler(func=lambda call: call.data == "cancel_clear_blacklist")
+    def handle_cancel_clear_blacklist(call):
+        if call.from_user.id == admin_id:
+            bot.edit_message_text(
+                chat_id=call.message.chat.id,
+                message_id=call.message.message_id,
+                text="❌ O'chirish bekor qilindi.",
+                reply_markup=None
+            )
+            bot.answer_callback_query(call.id, "Bekor qilindi!")
+        else:
+            bot.answer_callback_query(call.id, "❌ Sizga ruxsat yo'q!")
