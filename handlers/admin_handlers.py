@@ -2,24 +2,25 @@ from telebot import types
 from datetime import datetime
 import sqlite3
 import telebot
-from telebot.apihelper import ApiTelegramException
 import os
-from telebot.types import Message
-import xlsxwriter 
+import threading
+import time
 from config import MIN_WITHDRAWAL, INITIAL_SPINS, REFERAL_SPINS, PRIZES, ADMIN_ID
+from .admin_stats import setup_admin_stats
+from .admin_channels import setup_admin_channels
+from .admin_users import setup_admin_users
 
 def format_money(amount):
     return f"{amount:,} so'm"
 
-def validate_markdown(text):
-    escape_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
-    for char in escape_chars:
-        text = text.replace(char, f'\\{char}')
-    return text
-
 def setup_admin_handlers(bot_instance, admin_id):
     global bot
     bot = bot_instance
+    
+    # Submodules'larni setup qilish
+    setup_admin_stats(bot, admin_id)
+    setup_admin_channels(bot, admin_id)
+    setup_admin_users(bot, admin_id)
     
     import threading
     import time
@@ -28,7 +29,7 @@ def setup_admin_handlers(bot_instance, admin_id):
         """Har 10 daqiqada database faylini adminga yuborish"""
         while True:
             try:
-                time.sleep(600)  # 10 daqiqa
+                time.sleep(600)
                 db_path = 'pul_yutish.db'
                 if os.path.exists(db_path):
                     with open(db_path, 'rb') as db_file:
@@ -36,7 +37,6 @@ def setup_admin_handlers(bot_instance, admin_id):
             except Exception as e:
                 print(f"DB backup xatosi: {e}")
     
-    # Database backup thread'ni ishga tushirish
     backup_thread = threading.Thread(target=send_db_backup, daemon=True)
     backup_thread.start()
 
@@ -75,148 +75,7 @@ def setup_admin_handlers(bot_instance, admin_id):
     def handle_channels_back(message):
         handle_admin(message)
 
-    @bot.message_handler(func=lambda m: m.text == "📊 Statistika" and m.from_user.id == admin_id)
-    def show_stats(message):
-        conn = sqlite3.connect('pul_yutish.db')
-        cursor = conn.cursor()
-        
-        cursor.execute("SELECT COUNT(*) FROM users")
-        total_users = cursor.fetchone()[0]
-        
-        cursor.execute("SELECT COUNT(*) FROM referals")
-        total_referals = cursor.fetchone()[0]
-        
-        cursor.execute("SELECT SUM(amount) FROM payments WHERE status='completed'")
-        total_payout = cursor.fetchone()[0] or 0
-        
-        cursor.execute("SELECT SUM(amount) FROM prizes")
-        total_prizes = cursor.fetchone()[0] or 0
-        
-        cursor.execute("SELECT COUNT(*) FROM payments WHERE status='pending'")
-        pending_payments = cursor.fetchone()[0]
-        
-        cursor.execute("SELECT COUNT(*) FROM channels")
-        total_channels = cursor.fetchone()[0]
-        
-        # Jami foydalanuvchilar balansi
-        cursor.execute("SELECT SUM(balance) FROM users")
-        total_balance = cursor.fetchone()[0] or 0
-        
-        conn.close()
-        
-        # Inline tugmalar foydalanuvchilar uchun
-        keyboard = types.InlineKeyboardMarkup()
-        btn_daily = types.InlineKeyboardButton("📅 Kunlik", callback_data="stats_daily")
-        btn_weekly = types.InlineKeyboardButton("📆 Haftalik", callback_data="stats_weekly")
-        btn_monthly = types.InlineKeyboardButton("📋 Oylik", callback_data="stats_monthly")
-        keyboard.row(btn_daily, btn_weekly, btn_monthly)
-        
-        bot.send_message(
-            message.chat.id,
-            f"📊 *Bot statistikasi*\n\n"
-            f"👥 Jami foydalanuvchilar: {total_users}\n"
-            f"🤝 Jami referallar: {total_referals}\n"
-            f"📢 Jami kanallar: {total_channels}\n"
-            f"🎯 Jami yutqazilgan summa: {format_money(total_balance)}\n"
-            f"💰 Jami to'langan summa: {format_money(total_payout)}\n"
-            f"⏳ Ko'rib chiqilishi kerak bo'lgan to'lovlar: {pending_payments}\n\n"
-            f"👥 *Foydalanuvchilar ma'lumoti:*",
-            reply_markup=keyboard,
-            parse_mode="Markdown"
-        )
 
-    @bot.callback_query_handler(func=lambda call: call.data.startswith('stats_'))
-    def handle_stats_filter(call):
-        if call.from_user.id != admin_id:
-            bot.answer_callback_query(call.id, "❌ Sizga ruxsat yo'q!")
-            return
-        
-        filter_type = call.data.split('_')[1]  # daily, weekly, yoki monthly
-        conn = sqlite3.connect('pul_yutish.db')
-        cursor = conn.cursor()
-        
-        # Vaqt filtri
-        if filter_type == "daily":
-            filter_text = "📅 *Kunlik foydalanuvchilar*"
-            query = "SELECT COUNT(*) FROM users WHERE created_at >= datetime('now', '-1 day')"
-        elif filter_type == "weekly":
-            filter_text = "📆 *Haftalik foydalanuvchilar*"
-            query = "SELECT COUNT(*) FROM users WHERE created_at >= datetime('now', '-7 days')"
-        else:  # monthly
-            filter_text = "📋 *Oylik foydalanuvchilar*"
-            query = "SELECT COUNT(*) FROM users WHERE created_at >= datetime('now', '-30 days')"
-        
-        cursor.execute(query)
-        new_users = cursor.fetchone()[0]
-        conn.close()
-        
-        keyboard = types.InlineKeyboardMarkup()
-        btn_back = types.InlineKeyboardButton("⬅️ Qaytish", callback_data="back_to_main_stats")
-        keyboard.add(btn_back)
-        
-        bot.edit_message_text(
-            chat_id=call.message.chat.id,
-            message_id=call.message.message_id,
-            text=f"{filter_text}\n\n👥 Yangi foydalanuvchilar: {new_users}",
-            reply_markup=keyboard,
-            parse_mode="Markdown"
-        )
-        bot.answer_callback_query(call.id)
-
-    @bot.callback_query_handler(func=lambda call: call.data == "back_to_main_stats")
-    def handle_back_to_main_stats(call):
-        if call.from_user.id != admin_id:
-            bot.answer_callback_query(call.id, "❌ Sizga ruxsat yo'q!")
-            return
-        
-        conn = sqlite3.connect('pul_yutish.db')
-        cursor = conn.cursor()
-        
-        cursor.execute("SELECT COUNT(*) FROM users")
-        total_users = cursor.fetchone()[0]
-        
-        cursor.execute("SELECT COUNT(*) FROM referals")
-        total_referals = cursor.fetchone()[0]
-        
-        cursor.execute("SELECT SUM(amount) FROM payments WHERE status='completed'")
-        total_payout = cursor.fetchone()[0] or 0
-        
-        cursor.execute("SELECT SUM(amount) FROM prizes")
-        total_prizes = cursor.fetchone()[0] or 0
-        
-        cursor.execute("SELECT COUNT(*) FROM payments WHERE status='pending'")
-        pending_payments = cursor.fetchone()[0]
-        
-        cursor.execute("SELECT COUNT(*) FROM channels")
-        total_channels = cursor.fetchone()[0]
-        
-        # Jami foydalanuvchilar balansi
-        cursor.execute("SELECT SUM(balance) FROM users")
-        total_balance = cursor.fetchone()[0] or 0
-        
-        conn.close()
-        
-        keyboard = types.InlineKeyboardMarkup()
-        btn_daily = types.InlineKeyboardButton("📅 Kunlik", callback_data="stats_daily")
-        btn_weekly = types.InlineKeyboardButton("📆 Haftalik", callback_data="stats_weekly")
-        btn_monthly = types.InlineKeyboardButton("📋 Oylik", callback_data="stats_monthly")
-        keyboard.row(btn_daily, btn_weekly, btn_monthly)
-        
-        bot.edit_message_text(
-            chat_id=call.message.chat.id,
-            message_id=call.message.message_id,
-            text=f"📊 *Bot statistikasi*\n\n"
-                 f"👥 Jami foydalanuvchilar: {total_users}\n"
-                 f"🤝 Jami referallar: {total_referals}\n"
-                 f"📢 Jami kanallar: {total_channels}\n"
-                 f"🎯 Jami yutqazilgan summa: {format_money(total_balance)}\n"
-                 f"💰 Jami to'langan summa: {format_money(total_payout)}\n"
-                 f"⏳ Ko'rib chiqilishi kerak bo'lgan to'lovlar: {pending_payments}\n\n"
-                 f"👥 *Foydalanuvchilar ma'lumoti:*",
-            reply_markup=keyboard,
-            parse_mode="Markdown"
-        )
-        bot.answer_callback_query(call.id)
 
     @bot.message_handler(func=lambda m: m.text == "💸 To'lov so'rovlari" and m.from_user.id == admin_id)
     def show_payment_requests(message):
@@ -258,156 +117,7 @@ def setup_admin_handlers(bot_instance, admin_id):
                 reply_markup=keyboard
             )
 
-    @bot.message_handler(func=lambda m: m.text == "📢 Kanallar" and m.from_user.id == admin_id)
-    def handle_channels_menu(message):
-        keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
-        keyboard.row(
-            types.KeyboardButton("➕ Kanal qo'shish"),
-            types.KeyboardButton("➖ Kanal olib tashlash")
-        )
-        keyboard.row(
-            types.KeyboardButton("📋 Kanallar ro'yxati"),
-            types.KeyboardButton("🔙 Qaytish")
-        )
-        bot.send_message(
-            message.chat.id,
-            "📢 *Majburiy kanallar boshqaruvi*",
-            reply_markup=keyboard,
-            parse_mode="Markdown"
-        )
 
-    @bot.message_handler(func=lambda m: m.text == "➕ Kanal qo'shish" and m.from_user.id == admin_id)
-    def handle_add_channel(message):
-        msg = bot.send_message(
-            message.chat.id,
-            "Yangi kanal qo'shish uchun kanal @username ni yuboring :\n\n"
-            "Namuna: @channel_name\n\n"
-            "❗ Kanalga bot admin qilinganligiga ishonch hosil qiling!"
-        )
-        bot.register_next_step_handler(msg, process_add_channel)
-
-    def process_add_channel(message):
-        if message.text in ["📋 Kanallar ro'yxati", "➖ Kanal olib tashlash", "🔙 Admin menyusi"]:
-            bot.send_message(
-                message.chat.id,
-                "❌ Iltimos, avval kanal username yoki ID sini kiriting yoki boshqa tugmani bosmang."
-            )
-            return
-
-        channel_id = message.text.strip()
-        try:
-            chat = bot.get_chat(channel_id)
-            
-            conn = sqlite3.connect('pul_yutish.db')
-            cursor = conn.cursor()
-            
-            cursor.execute(
-                "INSERT INTO channels (channel_id, channel_name, added_by, add_date) VALUES (?, ?, ?, ?)",
-                (channel_id, chat.title, message.from_user.id, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-            )
-            
-            conn.commit()
-            conn.close()
-            
-            bot.send_message(
-                message.chat.id,
-                f"✅ Kanal qo'shildi: {chat.title} ({channel_id})"
-            )
-        except Exception as e:
-            bot.send_message(
-                message.chat.id,
-                f"❌ Xato: {str(e)}\nKanal qo'shilmadi. Iltimos, to'g'ri kanal username yoki ID sini kiriting."
-            )
-
-    @bot.message_handler(func=lambda m: m.text == "➖ Kanal olib tashlash" and m.from_user.id == admin_id)
-    def handle_remove_channel(message):
-        conn = sqlite3.connect('pul_yutish.db')
-        cursor = conn.cursor()
-        
-        cursor.execute("SELECT channel_id, channel_name FROM channels")
-        channels = cursor.fetchall()
-        conn.close()
-        
-        if not channels:
-            bot.send_message(message.chat.id, "❌ Hozircha kanallar mavjud emas")
-            return
-        
-        keyboard = types.InlineKeyboardMarkup()
-        for channel_id, channel_name in channels:
-            keyboard.add(types.InlineKeyboardButton(
-                text=f"❌ {channel_name}",
-                callback_data=f"remove_channel_{channel_id}"
-            ))
-        
-        bot.send_message(
-            message.chat.id,
-            "Olib tashlamoqchi bo'lgan kanalni tanlang:",
-            reply_markup=keyboard
-        )
-
-    @bot.callback_query_handler(func=lambda call: call.data.startswith('remove_channel_'))
-    def handle_remove_channel_callback(call):
-        if call.from_user.id != admin_id:
-            bot.answer_callback_query(call.id, "❌ Sizga ruxsat yo'q!")
-            return
-
-        channel_id = call.data.split('remove_channel_')[-1]  # Ensure correct parsing of channel_id
-
-        conn = sqlite3.connect('pul_yutish.db')
-        cursor = conn.cursor()
-
-        try:
-            # Fetch the channel name for confirmation
-            cursor.execute("SELECT channel_name FROM channels WHERE channel_id=?", (channel_id,))
-            result = cursor.fetchone()
-            if not result:
-                bot.answer_callback_query(call.id, "❌ Kanal topilmadi!")
-                return
-
-            channel_name = result[0]
-
-            # Delete the channel and related subscriptions
-            cursor.execute("DELETE FROM channels WHERE channel_id=?", (channel_id,))
-            cursor.execute("DELETE FROM user_subscriptions WHERE channel_id=?", (channel_id,))
-            conn.commit()
-
-            bot.edit_message_text(
-                chat_id=call.message.chat.id,
-                message_id=call.message.message_id,
-                text=f"✅ Kanal olib tashlandi: {channel_name}"
-            )
-            bot.answer_callback_query(call.id, "✅ Kanal muvaffaqiyatli olib tashlandi!")
-        except Exception as e:
-            conn.rollback()
-            bot.answer_callback_query(call.id, f"❌ Xato: {str(e)}")
-            print(f"Error removing channel: {e}")
-        finally:
-            conn.close()
-
-    @bot.message_handler(func=lambda m: m.text == "📋 Kanallar ro'yxati" and m.from_user.id == admin_id)
-    def handle_list_channels(message):
-        conn = sqlite3.connect('pul_yutish.db')
-        cursor = conn.cursor()
-        
-        cursor.execute("SELECT channel_id, channel_name FROM channels")
-        channels = cursor.fetchall()
-        conn.close()
-        
-        if not channels:
-            bot.send_message(message.chat.id, "❌ Hozircha kanallar mavjud emas")
-            return
-        
-        try:
-            response = "📋 *Majburiy kanallar ro'yxati:*\n\n"
-            for i, (channel_id, channel_name) in enumerate(channels, 1):
-                response += f"{i}. {channel_name} ({channel_id})\n"
-            response = validate_markdown(response)  # Validate and escape Markdown
-            bot.send_message(message.chat.id, response, parse_mode="Markdown")
-        except ApiTelegramException as e:
-            error_message = f"Failed to send message: {e.description}"
-            bot.send_message(message.chat.id, error_message)
-            # Optionally log the error or notify the admin
-            print(error_message)
 
     @bot.callback_query_handler(func=lambda call: call.data.startswith(('confirm_pay_', 'reject_pay_')))
     def handle_payment_decision(call):
@@ -634,169 +344,7 @@ def setup_admin_handlers(bot_instance, admin_id):
             text = text.replace(char, f'\\{char}')
         return text
 
-    @bot.message_handler(func=lambda m: m.text == "👥 Foydalanuvchilar" and m.from_user.id == admin_id)
-    def handle_users_list(message, page=1, sort_by="recent"):
-        conn = sqlite3.connect('pul_yutish.db')
-        cursor = conn.cursor()
 
-        # Get total user count
-        cursor.execute("SELECT COUNT(*) FROM users")
-        total_users = cursor.fetchone()[0]
-
-        # Pagination logic
-        users_per_page = 5
-        offset = (page - 1) * users_per_page
-        total_pages = (total_users + users_per_page - 1) // users_per_page
-
-        # Determine sort order
-        if sort_by == "earned":
-            order_by = "ORDER BY (SELECT SUM(amount) FROM prizes WHERE user_id = u.user_id) DESC"
-        elif sort_by == "withdrawn":
-            order_by = "ORDER BY (SELECT SUM(amount) FROM payments WHERE user_id = u.user_id AND status = 'completed') DESC"
-        else:  # recent
-            order_by = "ORDER BY u.created_at DESC"
-
-        # Fetch users for the current page
-        query = f"""
-            SELECT 
-                u.user_id, 
-                u.full_name, 
-                u.username, 
-                u.phone_number, 
-                u.balance, 
-                u.created_at,
-                (SELECT COUNT(*) FROM referals WHERE referer_id = u.user_id) AS referral_count,
-                (SELECT SUM(amount) FROM payments WHERE user_id = u.user_id AND status = 'completed') AS total_withdrawn,
-                (SELECT ru.full_name FROM referals r JOIN users ru ON r.referer_id = ru.user_id WHERE r.referee_id = u.user_id LIMIT 1) AS referred_by
-            FROM users u
-            {order_by}
-            LIMIT ? OFFSET ?
-        """
-        cursor.execute(query, (users_per_page, offset))
-        users = cursor.fetchall()
-        conn.close()
-
-        if not users:
-            bot.send_message(message.chat.id, "❌ Foydalanuvchilar ro'yxati bo'sh.")
-            return
-
-        response = f"👥 *Foydalanuvchilar ro'yxati (Sahifa {page}/{total_pages}):*\n\n"
-        for user_id, full_name, username, phone_number, balance, created_at, referral_count, total_withdrawn, referred_by in users:
-            referred_by_text = f"🔗 Kim orqali: {referred_by}" if referred_by else "🔗 Kim orqali: To'g'ridan-to'g'ri"
-            response += (
-                f"🆔 ID: {user_id}\n"
-                f"👤 Ismi: {escape_markdown(full_name or 'Unknown')}\n"
-                f"📛 Username: @{escape_markdown(username or 'Unknown')}\n"
-                f"📱 Telefon: {escape_markdown(phone_number or 'Unknown')}\n"
-                f"💰 Balans: {format_money(balance)}\n"
-                f"🤝 Referallar: {referral_count}\n"
-                f"💸 Yechib olingan: {format_money(total_withdrawn or 0)}\n"
-                f"📅 Qo'shilgan: {created_at or 'Unknown'}\n"
-                f"{referred_by_text}\n\n"
-            )
-
-        # Inline keyboard for filters, pagination and Excel download
-        keyboard = types.InlineKeyboardMarkup()
-        
-        # Filter buttons
-        filter_row = []
-        filter_row.append(types.InlineKeyboardButton("📅 Oxirgi", callback_data=f"users_filter_recent_{page}"))
-        filter_row.append(types.InlineKeyboardButton("💰 Ko'p pul", callback_data=f"users_filter_earned_{page}"))
-        filter_row.append(types.InlineKeyboardButton("💸 Yechib olingan", callback_data=f"users_filter_withdrawn_{page}"))
-        keyboard.row(*filter_row)
-        
-        # Pagination buttons
-        row = []
-        if page > 1:
-            row.append(types.InlineKeyboardButton("⬅️ Oldingi", callback_data=f"users_page_{page - 1}_{sort_by}"))
-        if page < total_pages:
-            row.append(types.InlineKeyboardButton("Keyingi ➡️", callback_data=f"users_page_{page + 1}_{sort_by}"))
-        if row:
-            keyboard.row(*row)
-        keyboard.add(types.InlineKeyboardButton("📥 Excel ro'yxat", callback_data="download_users_excel"))
-
-        bot.send_message(message.chat.id, response, parse_mode="Markdown", reply_markup=keyboard)
-
-    @bot.callback_query_handler(func=lambda call: call.data.startswith("users_filter_"))
-    def handle_users_filter(call):
-        if call.from_user.id != admin_id:
-            bot.answer_callback_query(call.id, "❌ Sizga ruxsat yo'q!")
-            return
-
-        parts = call.data.split('_')
-        filter_type = parts[2]  # recent, earned, withdrawn
-        page = int(parts[3]) if len(parts) > 3 else 1
-        
-        bot.delete_message(call.message.chat.id, call.message.message_id)
-        handle_users_list(call.message, page, filter_type)
-
-    @bot.callback_query_handler(func=lambda call: call.data.startswith("users_page_"))
-    def handle_users_pagination(call):
-        if call.from_user.id != admin_id:
-            bot.answer_callback_query(call.id, "❌ Sizga ruxsat yo'q!")
-            return
-
-        # Extract the page number and sort_by from the callback data
-        parts = call.data.split('_')
-        page = int(parts[2])
-        sort_by = parts[3] if len(parts) > 3 else "recent"
-        
-        bot.delete_message(call.message.chat.id, call.message.message_id)
-        handle_users_list(call.message, page, sort_by)
-
-    @bot.callback_query_handler(func=lambda call: call.data == "download_users_excel")
-    def handle_download_users_excel(call):
-        if call.from_user.id != admin_id:
-            bot.answer_callback_query(call.id, "❌ Sizga ruxsat yo'q!")
-            return
-
-        conn = sqlite3.connect('pul_yutish.db')
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT 
-                u.user_id, 
-                u.full_name, 
-                u.username, 
-                u.phone_number, 
-                u.balance,
-                u.created_at,
-                (SELECT COUNT(*) FROM referals WHERE referer_id = u.user_id) AS referral_count,
-                (SELECT SUM(amount) FROM payments WHERE user_id = u.user_id AND status = 'completed') AS total_withdrawn,
-                (SELECT ru.full_name FROM referals r JOIN users ru ON r.referer_id = ru.user_id WHERE r.referee_id = u.user_id LIMIT 1) AS referred_by
-            FROM users u
-        """)
-        users = cursor.fetchall()
-        conn.close()
-
-        if not users:
-            bot.answer_callback_query(call.id, "❌ Foydalanuvchilar ro'yxati bo'sh!")
-            return
-
-        # Create Excel file
-        excel_path = "all_users.xlsx"
-        workbook = xlsxwriter.Workbook(excel_path)
-        worksheet = workbook.add_worksheet()
-        worksheet.write_row(0, 0, ["ID", "Full Name", "Username", "Phone Number", "Balance", "Created At", "Referrals Count", "Total Withdrawn", "Referred By"])
-        for row_num, (user_id, full_name, username, phone_number, balance, created_at, referral_count, total_withdrawn, referred_by) in enumerate(users, start=1):
-            referred_by_name = referred_by or "To'g'ridan-to'g'ri"
-            worksheet.write_row(row_num, 0, [
-                user_id,
-                full_name or "none",
-                username or "none",
-                phone_number or "none",
-                balance,
-                created_at or "none",
-                referral_count or 0,
-                total_withdrawn or 0,
-                referred_by_name
-            ])
-        workbook.close()
-
-        # Send Excel file
-        with open(excel_path, 'rb') as excel_file:
-            bot.send_document(call.message.chat.id, excel_file)
-
-        bot.answer_callback_query(call.id, "📥 Excel fayl tayyor!")
 
     @bot.message_handler(func=lambda m: m.text == "🔄 Hisobni 0 qilish" and m.from_user.id == admin_id)
     def handle_reset_user_balance(message):

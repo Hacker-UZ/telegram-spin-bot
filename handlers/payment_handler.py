@@ -232,39 +232,4 @@ def setup_payment_handler(bot, admin_id):
         )
         bot.register_next_step_handler(msg, process_payment_info, user_id, balance)
 
-    @bot.message_handler(content_types=['contact'])
-    def handle_contact(message):
-        if message.contact:
-            user_id = message.from_user.id
-            phone_number = message.contact.phone_number
 
-            conn = sqlite3.connect('pul_yutish.db')
-            cursor = conn.cursor()
-
-            try:
-                # Telefon raqamini bazaga saqlash
-                cursor.execute("UPDATE users SET phone_number=? WHERE user_id=?", (phone_number, user_id))
-                conn.commit()
-
-                # Balansni olish
-                cursor.execute("SELECT balance FROM users WHERE user_id=?", (user_id,))
-                balance = cursor.fetchone()[0]
-
-                if balance < MIN_WITHDRAWAL:
-                    bot.send_message(
-                        message.chat.id,
-                        f"❌ Pul yechish uchun minimal balans: {format_money(MIN_WITHDRAWAL)}\n"
-                        f"Sizning balansingiz: {format_money(balance)}"
-                    )
-                    conn.close()
-                    return
-
-                # Muvaffaqiyatlik xabari
-                bot.send_message(message.chat.id, "✅ Telefon raqamingiz saqlandi!")
-                
-                # Karta ma'lumotlarini so'ramiz
-                proceed_to_payment_info(message, user_id, balance)
-            except Exception as e:
-                bot.send_message(message.chat.id, f"❌ Telefon raqamini saqlashda xatolik yuz berdi: {str(e)}")
-            finally:
-                conn.close()

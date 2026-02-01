@@ -5,6 +5,24 @@ from config import INITIAL_SPINS, MIN_WITHDRAWAL, ADMIN_ID, PRIZES_LOW_BALANCE, 
 import random
 
 def setup_user_handlers(bot):
+    def extract_channel_id(channel_link):
+        """Link'dan channel_id ni ajratib olish"""
+        if channel_link.startswith("@"):
+            return channel_link
+        elif "https://t.me/+" in channel_link:
+            # Private kanal invite link
+            return channel_link
+        elif "https://t.me/" in channel_link:
+            # https://t.me/channel_name -> @channel_name
+            username = channel_link.replace("https://t.me/", "").split("?")[0].split("/")[0]
+            return "@" + username
+        elif "t.me/" in channel_link:
+            # t.me/channel_name -> @channel_name
+            username = channel_link.replace("t.me/", "").split("?")[0].split("/")[0]
+            return "@" + username
+        else:
+            return "@" + channel_link
+    
     def check_subscription(bot, user_id):
         conn = sqlite3.connect('pul_yutish.db')
         cursor = conn.cursor()
@@ -20,19 +38,28 @@ def setup_user_handlers(bot):
         unsubscribed = []
         for channel_id, channel_name in channels:
             try:
-                member = bot.get_chat_member(channel_id, user_id)
+                # Private kanal invite link'larini tekshirvdan o'tkazish
+                if channel_id.startswith("https://t.me/+"):
+                    # Private kanal - tekshirish kerak emas, skip
+                    continue
+                
+                # Channel_id'ni to'g'ri formatga aylantirib olish
+                api_channel_id = extract_channel_id(channel_id)
+                
+                # Oddiy kanal tekshiruvi
+                member = bot.get_chat_member(api_channel_id, user_id)
                 if member.status not in ['member', 'administrator', 'creator']:
                     unsubscribed.append((channel_id, channel_name))
             except Exception as e:
                 print(f"Error checking subscription for channel {channel_id}: {e}")
-                continue  # Skip this channel and proceed with others
+                continue
 
         if unsubscribed:
             conn.close()
-            return False  # User is not subscribed to all channels
+            return False
 
         conn.close()
-        return True  # User is subscribed to all channels
+        return True
 
     def referral_logic(bot, message, user_id):
         conn = sqlite3.connect('pul_yutish.db')
@@ -151,21 +178,17 @@ def setup_user_handlers(bot):
         cursor = conn.cursor()
 
         # Fetch all mandatory channels
-        cursor.execute("SELECT channel_id, channel_name FROM channels")
+        cursor.execute("SELECT channel_id FROM channels")
         channels = cursor.fetchall()
         conn.close()
 
         keyboard = types.InlineKeyboardMarkup()
-        for channel_id, channel_name in channels:
-            try:
-                member = bot.get_chat_member(channel_id, message.from_user.id)
-                status_icon = "✅" if member.status in ['member', 'administrator', 'creator'] else "❌"
-            except Exception:
-                status_icon = "❌"  # Default to not subscribed if an error occurs
-
+        
+        for i, (channel_id,) in enumerate(channels, 1):
+            # URL sifatida channel_id ni qo'shish (to'g'ridan-to'g'ri link)
             keyboard.add(types.InlineKeyboardButton(
-                text=f"{status_icon} {channel_name}",
-                url=f"https://t.me/{channel_id[1:] if channel_id.startswith('@') else channel_id}"
+                text=f"{i}-kanal",
+                url=channel_id
             ))
 
         bot.send_message(
