@@ -111,6 +111,20 @@ def init_db():
     # Set default ACTIVE_PRIZES if not already set
     cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('ACTIVE_PRIZES', 'PRIZES')")
 
+    # Database indekslarini qo'shish (performance uchun)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_user_id ON users(user_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_referals_referer_id ON referals(referer_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_referals_referee_id ON referals(referee_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_payments_user_id ON payments(user_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_payments_status ON payments(status)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_prizes_user_id ON prizes(user_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_channels_channel_id ON channels(channel_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_user_subscriptions_user_id ON user_subscriptions(user_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_user_subscriptions_channel_id ON user_subscriptions(channel_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_blacklist_user_id ON blacklist(user_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_created_at ON users(created_at)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_payments_request_date ON payments(request_date)")
+
     conn.commit()
     conn.close()
 
