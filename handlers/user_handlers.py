@@ -47,12 +47,16 @@ def setup_user_handlers(bot):
                 api_channel_id = extract_channel_id(channel_id)
                 
                 # Oddiy kanal tekshiruvi
-                member = bot.get_chat_member(api_channel_id, user_id)
-                if member.status not in ['member', 'administrator', 'creator']:
+                try:
+                    member = bot.get_chat_member(api_channel_id, user_id)
+                    if member.status not in ['member', 'administrator', 'creator']:
+                        unsubscribed.append((channel_id, channel_name))
+                except:
+                    # Agar tekshirish xatosi bo'lsa, subscribe qilinmagan deb hisob qil
                     unsubscribed.append((channel_id, channel_name))
             except Exception as e:
                 print(f"Error checking subscription for channel {channel_id}: {e}")
-                continue
+                unsubscribed.append((channel_id, channel_name))
 
         if unsubscribed:
             conn.close()
@@ -174,29 +178,126 @@ def setup_user_handlers(bot):
                 conn.close()
 
     def prompt_subscription(bot, message):
+        user_id = message.from_user.id
         conn = sqlite3.connect('pul_yutish.db')
         cursor = conn.cursor()
 
         # Fetch all mandatory channels
-        cursor.execute("SELECT channel_id FROM channels")
+        cursor.execute("SELECT channel_id, channel_name FROM channels")
         channels = cursor.fetchall()
         conn.close()
 
+        if not channels:
+            # Agar kanallar bo'lmasa, to'g'ridan-to'g'ri asosiy menyuni ko'rsatish
+            show_main_menu(message)
+            return
+
+        # Faqat obuna bo'lmagan kanallarni filter qilish
+        unsubscribed_channels = []
+        for channel_id, channel_name in channels:
+            try:
+                # Private kanal invite link'larini tekshirvdan o'tkazish
+                if channel_id.startswith("https://t.me/+"):
+                    unsubscribed_channels.append((channel_id, channel_name))
+                    continue
+                
+                # Channel_id'ni to'g'ri formatga aylantirib olish
+                api_channel_id = extract_channel_id(channel_id)
+                
+                # Oddiy kanal tekshiruvi
+                try:
+                    member = bot.get_chat_member(api_channel_id, user_id)
+                    if member.status not in ['member', 'administrator', 'creator']:
+                        unsubscribed_channels.append((channel_id, channel_name))
+                except:
+                    # Agar tekshirish xatosi bo'lsa, subscribe qilinmagan deb hisob qil
+                    unsubscribed_channels.append((channel_id, channel_name))
+            except Exception as e:
+                print(f"Error checking subscription for channel {channel_id}: {e}")
+                unsubscribed_channels.append((channel_id, channel_name))
+
+        # Agar barcha kanallarga obuna bo'lgan bo'lsa
+        if not unsubscribed_channels:
+            show_main_menu(message)
+            return
+
         keyboard = types.InlineKeyboardMarkup()
         
-        for i, (channel_id,) in enumerate(channels, 1):
-            # URL sifatida channel_id ni qo'shish (to'g'ridan-to'g'ri link)
-            keyboard.add(types.InlineKeyboardButton(
-                text=f"{i}-kanal",
-                url=channel_id
+        # Faqat obuna bo'lmagan kanallarni 2 ustunda chiqarish
+        for i in range(0, len(unsubscribed_channels), 2):
+            row = []
+            
+            # Birinchi kanal
+            channel_id, channel_name = unsubscribed_channels[i]
+            if channel_id.startswith("https://t.me/+"):
+                url = channel_id
+            elif channel_id.startswith("@"):
+                url = f"https://t.me/{channel_id[1:]}"
+            elif channel_id.startswith("https://"):
+                url = channel_id
+            else:
+                url = f"https://t.me/{channel_id}"
+            
+            row.append(types.InlineKeyboardButton(
+                text="➕ Obuna bo'lish",
+                url=url
             ))
+            
+            # Ikkinchi kanal (agar mavjud bo'lsa)
+            if i + 1 < len(unsubscribed_channels):
+                channel_id, channel_name = unsubscribed_channels[i + 1]
+                if channel_id.startswith("https://t.me/+"):
+                    url = channel_id
+                elif channel_id.startswith("@"):
+                    url = f"https://t.me/{channel_id[1:]}"
+                elif channel_id.startswith("https://"):
+                    url = channel_id
+                else:
+                    url = f"https://t.me/{channel_id}"
+                
+                row.append(types.InlineKeyboardButton(
+                    text="➕ Obuna bo'lish",
+                    url=url
+                ))
+            
+            keyboard.row(*row)
 
+        # Tasdiqla tugmasi
+        keyboard.add(types.InlineKeyboardButton(
+            text="✅ Tasdiqlash",
+            callback_data="verify_subscription"
+        ))
+
+        message_text = f"⚠️Botdan foydalanish uchun kanallarga obuna bo'ling:\n"
+        
         bot.send_message(
             message.chat.id,
-            "📢 Botdan to'liq foydalanish uchun quyidagi kanallarga obuna bo'ling.\n"
-            "✅ Obuna bo'lgandan so'ng, /start buyrug'ini bosing.",
+            message_text,
             reply_markup=keyboard
         )
+
+    @bot.callback_query_handler(func=lambda call: call.data == "verify_subscription")
+    def handle_verify_subscription(call):
+        try:
+            user_id = call.from_user.id
+            
+            # Kanal obunasini tekshirish
+            if check_subscription(bot, user_id):
+                # Barcha kanallarga obuna bo'lgan
+                bot.answer_callback_query(call.id, "✅ Tasdiqlandi! Barcha kanallarga obuna bo'lgansiz.", show_alert=False)
+                
+                # Asosiy menyuni ko'rsatish
+                show_main_menu(call.message)
+            else:
+                # Hali obuna bo'lmagan kanallar bor
+                bot.answer_callback_query(
+                    call.id, 
+                    "❌ Iltimos, barcha kanallarga obuna bo'ling va qayta urinib ko'ring!", 
+                    show_alert=True
+                )
+        except Exception as e:
+            print(f"Error in verify_subscription: {e}")
+            bot.answer_callback_query(call.id, f"❌ Xato yuz berdi: {str(e)}", show_alert=True)
 
     @bot.message_handler(content_types=['contact'])
     def handle_contact(message):
@@ -227,9 +328,18 @@ def setup_user_handlers(bot):
             finally:
                 conn.close()
 
-    def show_main_menu(message):
+    def show_main_menu(message_or_call):
         try:
-            user_id = message.from_user.id
+            # message yoki callback query bo'lishi mumkin
+            if hasattr(message_or_call, 'chat'):
+                # Bu message
+                user_id = message_or_call.from_user.id
+                chat_id = message_or_call.chat.id
+            else:
+                # Bu callback query
+                user_id = message_or_call.from_user.id
+                chat_id = message_or_call.message.chat.id
+                
             conn = sqlite3.connect('pul_yutish.db')
             cursor = conn.cursor()
             
@@ -252,7 +362,7 @@ def setup_user_handlers(bot):
                 keyboard.row(types.KeyboardButton("👑 Admin"))
 
             bot.send_message(
-                message.chat.id,
+                chat_id,
                 f"🎰 *Pul Yutish Botiga xush kelibsiz!*\n\n"
                 f"💵 Balans: {balance:,} so'm\n"
                 f"🎡 Aylantirishlar: {spins_left}\n\n",
@@ -261,7 +371,14 @@ def setup_user_handlers(bot):
             )
         except Exception as e:
             print(f"Error in show_main_menu: {e}")
-            bot.send_message(message.chat.id, "❌ Xato yuz berdi. Iltimos, qayta urinib ko'ring.")
+            try:
+                if hasattr(message_or_call, 'chat'):
+                    chat_id = message_or_call.chat.id
+                else:
+                    chat_id = message_or_call.message.chat.id
+                bot.send_message(chat_id, "❌ Xato yuz berdi. Iltimos, qayta urinib ko'ring.")
+            except:
+                pass
 
     @bot.message_handler(func=lambda m: m.text == "💵 Pul ishlash")
     def handle_spin_request(message):
@@ -319,7 +436,7 @@ def setup_user_handlers(bot):
             time.sleep(1.2)
 
             # Balansga qarab yutuqlarni tanlash
-            if balance >= 18000:
+            if balance >= 3000:
                 prize = random.choice(PRIZES_HIGH_BALANCE)
             else:
                 prize = random.choice(PRIZES_LOW_BALANCE)

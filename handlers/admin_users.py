@@ -28,9 +28,9 @@ def setup_admin_users(bot_instance, admin_id):
         total_pages = (total_users + users_per_page - 1) // users_per_page
 
         if sort_by == "earned":
-            order_by = "ORDER BY (SELECT SUM(amount) FROM prizes WHERE user_id = u.user_id) DESC"
+            order_by = "ORDER BY COALESCE(u.balance, 0) DESC"
         elif sort_by == "withdrawn":
-            order_by = "ORDER BY (SELECT SUM(amount) FROM payments WHERE user_id = u.user_id AND status = 'completed') DESC"
+            order_by = "ORDER BY COALESCE((SELECT SUM(amount) FROM payments WHERE user_id = u.user_id AND status = 'completed'), 0) DESC"
         else:
             order_by = "ORDER BY u.created_at DESC"
 
@@ -57,14 +57,14 @@ def setup_admin_users(bot_instance, admin_id):
             bot.send_message(message.chat.id, "❌ Foydalanuvchilar ro'yxati bo'sh.")
             return
 
-        response = f"👥 *Foydalanuvchilar ro'yxati (Sahifa {page}/{total_pages}):*\n\n"
+        response = f"👥 Foydalanuvchilar ro'yxati (Sahifa {page}/{total_pages}):\n\n"
         for user_id, full_name, username, phone_number, balance, created_at, referral_count, total_withdrawn, referred_by in users:
             referred_by_text = f"🔗 Kim orqali: {referred_by}" if referred_by else "🔗 Kim orqali: To'g'ridan-to'g'ri"
             response += (
                 f"🆔 ID: {user_id}\n"
-                f"👤 Ismi: {escape_markdown(full_name or 'Unknown')}\n"
-                f"📛 Username: @{escape_markdown(username or 'Unknown')}\n"
-                f"📱 Telefon: {escape_markdown(phone_number or 'Unknown')}\n"
+                f"👤 Ismi: {full_name or 'Unknown'}\n"
+                f"📛 Username: @{username or 'Unknown'}\n"
+                f"📱 Telefon: {phone_number or 'Unknown'}\n"
                 f"💰 Balans: {format_money(balance)}\n"
                 f"🤝 Referallar: {referral_count}\n"
                 f"💸 Yechib olingan: {format_money(total_withdrawn or 0)}\n"
@@ -89,7 +89,7 @@ def setup_admin_users(bot_instance, admin_id):
             keyboard.row(*row)
         keyboard.add(types.InlineKeyboardButton("📥 Excel ro'yxat", callback_data="download_users_excel"))
 
-        bot.send_message(message.chat.id, response, parse_mode="Markdown", reply_markup=keyboard)
+        bot.send_message(message.chat.id, response, reply_markup=keyboard)
 
     @bot.callback_query_handler(func=lambda call: call.data.startswith("users_filter_"))
     def handle_users_filter(call):
@@ -101,8 +101,16 @@ def setup_admin_users(bot_instance, admin_id):
         filter_type = parts[2]
         page = int(parts[3]) if len(parts) > 3 else 1
         
+        # filter_type'ni sort_by'ga mapping qilish
+        sort_mapping = {
+            'recent': 'recent',
+            'earned': 'earned',
+            'withdrawn': 'withdrawn'
+        }
+        sort_by = sort_mapping.get(filter_type, 'recent')
+        
         bot.delete_message(call.message.chat.id, call.message.message_id)
-        handle_users_list(call.message, page, filter_type)
+        handle_users_list(call.message, page, sort_by)
 
     @bot.callback_query_handler(func=lambda call: call.data.startswith("users_page_"))
     def handle_users_pagination(call):
