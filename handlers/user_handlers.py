@@ -43,6 +43,11 @@ def setup_user_handlers(bot):
                     # Private kanal - tekshirish kerak emas, skip
                     continue
                 
+                # Query parametrli link'larni tekshirvdan o'tkazish (masalan, ?start=...)
+                if "?" in channel_id:
+                    # Query parametri bo'lgan link - tekshirish kerak emas, skip
+                    continue
+                
                 # Channel_id'ni to'g'ri formatga aylantirib olish
                 api_channel_id = extract_channel_id(channel_id)
                 
@@ -119,9 +124,9 @@ def setup_user_handlers(bot):
             user = cursor.fetchone()
 
             if not user:
-                # Add new user or reinitialize blocked user with initial spins
+                # Add new user with initial spins
                 cursor.execute(
-                    """INSERT OR REPLACE INTO users 
+                    """INSERT INTO users 
                        (user_id, username, full_name, spins_left, balance, created_at) 
                        VALUES (?, ?, ?, ?, ?, ?)""",
                     (user_id, message.from_user.username or "", 
@@ -192,13 +197,22 @@ def setup_user_handlers(bot):
             show_main_menu(message)
             return
 
-        # Faqat obuna bo'lmagan kanallarni filter qilish
-        unsubscribed_channels = []
+        # Faqat obuna bo'lmagan public kanallarni filter qilish
+        unsubscribed_public_channels = []
+        all_private_channels = []
+        
         for channel_id, channel_name in channels:
             try:
-                # Private kanal invite link'larini tekshirvdan o'tkazish
+                # Private kanal invite link'larini ajratib olish
                 if channel_id.startswith("https://t.me/+"):
-                    unsubscribed_channels.append((channel_id, channel_name))
+                    # Private kanal - private kanallar ro'yxatiga qo'shish
+                    all_private_channels.append((channel_id, channel_name))
+                    continue
+                
+                # Query parametrli link'larni private kanal sifatida qo'shish (masalan, ?start=...)
+                if "?" in channel_id:
+                    # Query parametri bo'lgan link - private kanal deb hisoblab, private kanallar ro'yxatiga qo'shish
+                    all_private_channels.append((channel_id, channel_name))
                     continue
                 
                 # Channel_id'ni to'g'ri formatga aylantirib olish
@@ -208,27 +222,32 @@ def setup_user_handlers(bot):
                 try:
                     member = bot.get_chat_member(api_channel_id, user_id)
                     if member.status not in ['member', 'administrator', 'creator']:
-                        unsubscribed_channels.append((channel_id, channel_name))
+                        unsubscribed_public_channels.append((channel_id, channel_name))
                 except:
                     # Agar tekshirish xatosi bo'lsa, subscribe qilinmagan deb hisob qil
-                    unsubscribed_channels.append((channel_id, channel_name))
+                    unsubscribed_public_channels.append((channel_id, channel_name))
             except Exception as e:
                 print(f"Error checking subscription for channel {channel_id}: {e}")
-                unsubscribed_channels.append((channel_id, channel_name))
+                unsubscribed_public_channels.append((channel_id, channel_name))
 
-        # Agar barcha kanallarga obuna bo'lgan bo'lsa
-        if not unsubscribed_channels:
+        # Agar barcha public kanallarga obuna bo'lgan bo'lsa
+        if not unsubscribed_public_channels:
             show_main_menu(message)
             return
 
         keyboard = types.InlineKeyboardMarkup()
         
+        # Agar public kanallarga obuna bo'lmagan bo'lsa, private kanallarni ham qo'shish
+        channels_to_show = unsubscribed_public_channels[:]
+        if unsubscribed_public_channels and all_private_channels:
+            channels_to_show.extend(all_private_channels)
+        
         # Faqat obuna bo'lmagan kanallarni 2 ustunda chiqarish
-        for i in range(0, len(unsubscribed_channels), 2):
+        for i in range(0, len(channels_to_show), 2):
             row = []
             
             # Birinchi kanal
-            channel_id, channel_name = unsubscribed_channels[i]
+            channel_id, channel_name = channels_to_show[i]
             if channel_id.startswith("https://t.me/+"):
                 url = channel_id
             elif channel_id.startswith("@"):
@@ -244,8 +263,8 @@ def setup_user_handlers(bot):
             ))
             
             # Ikkinchi kanal (agar mavjud bo'lsa)
-            if i + 1 < len(unsubscribed_channels):
-                channel_id, channel_name = unsubscribed_channels[i + 1]
+            if i + 1 < len(channels_to_show):
+                channel_id, channel_name = channels_to_show[i + 1]
                 if channel_id.startswith("https://t.me/+"):
                     url = channel_id
                 elif channel_id.startswith("@"):
@@ -283,13 +302,50 @@ def setup_user_handlers(bot):
             
             # Kanal obunasini tekshirish
             if check_subscription(bot, user_id):
-                # Barcha kanallarga obuna bo'lgan - /start buyrugi bajaramiz
+                # Barcha kanallarga obuna bo'lgan
                 bot.answer_callback_query(call.id, "✅ Tasdiqlandi! Barcha kanallarga obuna bo'lgansiz.", show_alert=False)
                 
-                # Referral bonus berish
                 conn = sqlite3.connect('pul_yutish.db')
                 cursor = conn.cursor()
                 
+                # Foydalanuvchi mavjudligini tekshirish
+                cursor.execute("SELECT user_id FROM users WHERE user_id=?", (user_id,))
+                user_exists = cursor.fetchone() is not None
+                
+                # Agar yangi foydalanuvchi bo'lsa, initial spins bilan yangi record yaratish
+                if not user_exists:
+                    cursor.execute(
+                        """INSERT INTO users 
+                           (user_id, username, full_name, spins_left, balance, created_at) 
+                           VALUES (?, ?, ?, ?, ?, ?)""",
+                        (user_id, call.from_user.username or "", 
+                         call.from_user.full_name or "", INITIAL_SPINS, 0,
+                         datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+                    )
+                    conn.commit()
+                    
+                    # Process referral logic for new users
+                    if len(call.message.text.split()) > 1:
+                        referal_code = call.message.text.split()[1]
+                        if referal_code.startswith('ref'):
+                            try:
+                                referer_id = int(referal_code[3:])
+                                if referer_id != user_id:
+                                    cursor.execute(
+                                        "SELECT COUNT(*) FROM referals WHERE referee_id=?", (user_id,)
+                                    )
+                                    referral_exists = cursor.fetchone()[0] > 0
+                                    
+                                    if not referral_exists:
+                                        cursor.execute(
+                                            "INSERT INTO referals (referer_id, referee_id, date, bonus_given) VALUES (?, ?, ?, ?)",
+                                            (referer_id, user_id, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), 0)
+                                        )
+                                        conn.commit()
+                            except:
+                                pass
+                
+                # Referral bonus berish (faqat yangi foydalanuvchi emas, balki obuna bo'lgan har bir foydalanuvchi uchun)
                 cursor.execute(
                     "SELECT referer_id, bonus_given FROM referals WHERE referee_id=? AND referer_id IS NOT NULL", (user_id,)
                 )
@@ -322,8 +378,17 @@ def setup_user_handlers(bot):
                 
                 conn.close()
                 
-                # /start buyrugi bajaramiz
-                handle_start(call.message)
+                # Obuna xabarini o'chirish
+                try:
+                    bot.delete_message(call.message.chat.id, call.message.message_id)
+                except:
+                    pass
+                
+                # Botdan foydalanish mumkinligini bildirish
+                bot.send_message(
+                    call.message.chat.id,
+                    "✅ Botdan foydalanishingiz mumkin!"
+                )
             else:
                 # Hali obuna bo'lmagan kanallar bor
                 bot.answer_callback_query(
