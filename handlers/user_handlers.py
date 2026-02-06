@@ -303,7 +303,7 @@ def setup_user_handlers(bot):
             # Kanal obunasini tekshirish
             if check_subscription(bot, user_id):
                 # Barcha kanallarga obuna bo'lgan
-                bot.answer_callback_query(call.id, "✅ Tasdiqlandi! Barcha kanallarga obuna bo'lgansiz.", show_alert=False)
+                bot.answer_callback_query(call.id, "✅ Tayyor /startni bosing", show_alert=False)
                 
                 conn = sqlite3.connect('pul_yutish.db')
                 cursor = conn.cursor()
@@ -660,4 +660,5 @@ def setup_user_handlers(bot):
         except Exception as e:
             print(f"Error in handle_referal: {e}")
             bot.send_message(message.chat.id, "❌ Xato yuz berdi. Iltimos, qayta urinib ko'ring.")
+
 
