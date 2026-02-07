@@ -108,6 +108,15 @@ def init_db():
                      added_date TEXT,
                      FOREIGN KEY(user_id) REFERENCES users(user_id))''')
 
+    # Forward rasmlar jadvali (albom sifatida yuborish uchun)
+    cursor.execute('''CREATE TABLE IF NOT EXISTS broadcast_photos
+                     (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                     media_group_id TEXT,
+                     file_id TEXT,
+                     file_unique_id TEXT,
+                     position INTEGER,
+                     created_at TEXT)''')
+
     # Set default ACTIVE_PRIZES if not already set
     cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('ACTIVE_PRIZES', 'PRIZES')")
 
