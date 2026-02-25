@@ -4,7 +4,7 @@ from telebot import apihelper
 from config import ADMIN_ID, BOT_TOKEN
 from database import init_db
 from handlers.user_handlers import setup_user_handlers
-from handlers.payment_handler import setup_payment_handler  
+from handlers.payment_handler import setup_payment_handler
 from handlers.admin_handlers import setup_admin_handlers
 from keep_alive import keep_alive
 

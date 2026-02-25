@@ -5,10 +5,11 @@ import telebot
 import os
 import threading
 import time
+import xlsxwriter
 from config import MIN_WITHDRAWAL, INITIAL_SPINS, REFERAL_SPINS, PRIZES, ADMIN_ID
 from .admin_stats import setup_admin_stats
 from .admin_channels import setup_admin_channels
-from .admin_users import setup_admin_users
+from database import get_user, update_user
 
 def format_money(amount):
     return f"{amount:,} so'm"
@@ -20,7 +21,6 @@ def setup_admin_handlers(bot_instance, admin_id):
     # Submodules'larni setup qilish
     setup_admin_stats(bot, admin_id)
     setup_admin_channels(bot, admin_id)
-    setup_admin_users(bot, admin_id)
     
     import threading
     import time
@@ -50,17 +50,13 @@ def setup_admin_handlers(bot_instance, admin_id):
         btn1 = types.KeyboardButton("📊 Statistika")
         btn2 = types.KeyboardButton("💸 To'lov so'rovlari")
         btn3 = types.KeyboardButton("📢 Kanallar")
-        btn4 = types.KeyboardButton("👥 Foydalanuvchilar")
-        btn6 = types.KeyboardButton("📢 Xabar yuborish")
-        btn7 = types.KeyboardButton("🔄 Hisobni 0 qilish")
-        btn9 = types.KeyboardButton("🎁 Bonus berish")
-        btn10 = types.KeyboardButton("➕ Kanalni aktivlashtirish")
-        btn8 = types.KeyboardButton("🔙 Asosiy menyu")
+        btn4 = types.KeyboardButton("👥 Foydalanuvchilar boshqaruvi")
+        btn5 = types.KeyboardButton("📢 Xabar yuborish")
+        btn6 = types.KeyboardButton("🔙 Asosiy menyu")
         keyboard.row(btn1, btn2)
-        keyboard.row(btn3, btn4)
-        keyboard.row(btn6, btn7)
-        keyboard.row(btn9, btn10)
-        keyboard.row(btn8)
+        keyboard.row(btn4)
+        keyboard.row(btn3, btn5)
+        keyboard.row(btn6)
         
         bot.send_message(
             message.chat.id,
@@ -245,25 +241,6 @@ def setup_admin_handlers(bot_instance, admin_id):
     def handle_admin_menu(message):
         handle_admin(message)
 
-    @bot.message_handler(func=lambda m: m.text == "⚙️ Sozlamalar" and m.from_user.id == admin_id)
-    def handle_settings_menu(message):
-        keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
-        keyboard.row(
-            types.KeyboardButton("👥 Foydalanuvchilar"),
-            types.KeyboardButton("📥 Download .db")
-        )
-        keyboard.row(
-            types.KeyboardButton("📢 Xabar yuborish"),
-            types.KeyboardButton("🚫 Foydalanuvchini bloklash")
-        )
-        keyboard.row(types.KeyboardButton("🔙 Qaytish"))
-        bot.send_message(
-            message.chat.id,
-            "⚙️ *Sozlamalar menyusi*",
-            reply_markup=keyboard,
-            parse_mode="Markdown"
-        )
-
     @bot.message_handler(func=lambda m: m.text == "📢 Xabar yuborish" and m.from_user.id == admin_id)
     def handle_broadcast_message(message):
         keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
@@ -361,11 +338,15 @@ def setup_admin_handlers(bot_instance, admin_id):
 
         success_count = 0
         failure_count = 0
-
+        
+        # Vaqtni kechiktirish uchun
+        import time
+        
         for (user_id,) in users:
             try:
                 bot.send_photo(user_id, photo_file_id, caption=caption)
                 success_count += 1
+                time.sleep(0.05)  # Telegram API limitiga mos kelib turish uchun
             except Exception as e:
                 print(f"Failed to send photo to {user_id}: {e}")
                 failure_count += 1
@@ -390,7 +371,6 @@ def setup_admin_handlers(bot_instance, admin_id):
         bot.register_next_step_handler(msg, process_forward_broadcast)
 
     def process_forward_broadcast(message):
-        # Oddiy forward - hammasi forward qilish (1 rasm, 5 rasm, text, hammasi)
         conn = sqlite3.connect('pul_yutish.db')
         cursor = conn.cursor()
 
@@ -401,12 +381,16 @@ def setup_admin_handlers(bot_instance, admin_id):
 
         success_count = 0
         failure_count = 0
+        
+        # Vaqtni kechiktirish uchun
+        import time
 
         for (user_id,) in users:
             try:
                 # Xabarni to'liq forward qilish
                 bot.forward_message(user_id, message.chat.id, message.message_id)
                 success_count += 1
+                time.sleep(0.05)  # Telegram API limitiga mos kelib turish uchun
             except Exception as e:
                 print(f"Failed to forward message to {user_id}: {e}")
                 failure_count += 1
@@ -427,323 +411,223 @@ def setup_admin_handlers(bot_instance, admin_id):
         else:
             bot.answer_callback_query(call.id, "❌ Sizga ruxsat yo'q!")
 
+    @bot.message_handler(func=lambda m: m.text == "👥 Foydalanuvchilar boshqaruvi" and m.from_user.id == admin_id)
+    def handle_user_management(message):
+        msg = bot.send_message(
+            message.chat.id,
+            "👤 Foydalanuvchi ID'sini kiriting:"
+        )
+        bot.register_next_step_handler(msg, process_user_management_id)
+
+    def process_user_management_id(message):
+        try:
+            user_id = int(message.text.strip())
+            conn = sqlite3.connect('pul_yutish.db')
+            cursor = conn.cursor()
+            
+            cursor.execute("SELECT user_id, username, full_name, balance, spins_left, phone_number FROM users WHERE user_id=?", (user_id,))
+            user = cursor.fetchone()
+            
+            if not user:
+                bot.send_message(message.chat.id, "❌ Foydalanuvchi topilmadi!")
+                conn.close()
+                return
+            
+            user_id_db, username, full_name, balance, spins_left, phone_number = user
+            
+            # Referallar sonini hisoblash
+            cursor.execute("SELECT COUNT(*) FROM referals WHERE referer_id=?", (user_id,))
+            referals_count = cursor.fetchone()[0]
+            
+            # Ban qilinganligini tekshirish
+            cursor.execute("SELECT user_id FROM blacklist WHERE user_id=?", (user_id,))
+            is_banned = cursor.fetchone() is not None
+            
+            conn.close()
+            
+            info = (
+                f"👤 *Foydalanuvchi ma'lumotlari:*\n\n"
+                f"🆔 ID: `{user_id_db}`\n"
+                f"👤 Ism: {full_name or 'Noma\'lum'}\n"
+                f"📱 Username: @{username or 'Noma\'lum'}\n"
+                f"📞 Telefon: {phone_number or 'Noma\'lum'}\n"
+                f"👥 Referallar: {referals_count}\n"
+                f"💰 Balans: {format_money(balance)}\n"
+                f"🎡 Aylantirishlar: {spins_left}\n"
+                f"{'🚫 *BAN QILINDI*' if is_banned else '✅ *FAOL*'}"
+            )
+            
+            keyboard = types.InlineKeyboardMarkup()
+            keyboard.row(
+                types.InlineKeyboardButton("➕ Pul qo'shish", callback_data=f"add_balance_{user_id_db}"),
+                types.InlineKeyboardButton("➖ Pul ayirish", callback_data=f"sub_balance_{user_id_db}")
+            )
+            
+            # Ban statusiga qarab tugmani ko'rsatish
+            if is_banned:
+                keyboard.add(types.InlineKeyboardButton("🔓 Banddan chiqarish", callback_data=f"unban_user_{user_id_db}"))
+            else:
+                keyboard.add(types.InlineKeyboardButton("🚫 Ban qilish", callback_data=f"ban_user_{user_id_db}"))
+            
+            bot.send_message(message.chat.id, info, parse_mode="Markdown", reply_markup=keyboard)
+        except ValueError:
+            bot.send_message(message.chat.id, "❌ Faqat raqam kiriting!")
+        except Exception as e:
+            bot.send_message(message.chat.id, f"❌ Xato: {str(e)}")
+
+    @bot.callback_query_handler(func=lambda call: call.data.startswith('add_balance_'))
+    def handle_add_balance(call):
+        if call.from_user.id != admin_id:
+            bot.answer_callback_query(call.id, "❌ Sizga ruxsat yo'q!")
+            return
+        
+        user_id = int(call.data.split('_')[2])
+        msg = bot.send_message(call.message.chat.id, "Qo'shmoqchi bo'lgan miqdorni kiriting (raqam):")
+        bot.register_next_step_handler(msg, lambda m: process_add_balance(m, user_id))
+
+    def process_add_balance(message, user_id):
+        try:
+            amount = int(message.text.strip())
+            if amount <= 0:
+                bot.send_message(message.chat.id, "❌ Musbat raqam kiriting!")
+                return
+            
+            user = get_user(user_id)
+            if not user:
+                bot.send_message(message.chat.id, "❌ Foydalanuvchi topilmadi!")
+                return
+            
+            current_balance = user[3]
+            new_balance = current_balance + amount
+            update_user(user_id, balance=new_balance)
+            
+            bot.send_message(message.chat.id, f"✅ {format_money(amount)} qo'shildi!\n💰 Yangi balans: {format_money(new_balance)}")
+            bot.send_message(user_id, f"✅ Admin sizga {format_money(amount)} qo'shdi!\n💰 Yangi balansingiz: {format_money(new_balance)}")
+        except ValueError:
+            bot.send_message(message.chat.id, "❌ Faqat raqam kiriting!")
+        except Exception as e:
+            bot.send_message(message.chat.id, f"❌ Xato: {str(e)}")
+
+    @bot.callback_query_handler(func=lambda call: call.data.startswith('sub_balance_'))
+    def handle_sub_balance(call):
+        if call.from_user.id != admin_id:
+            bot.answer_callback_query(call.id, "❌ Sizga ruxsat yo'q!")
+            return
+        
+        user_id = int(call.data.split('_')[2])
+        msg = bot.send_message(call.message.chat.id, "Ayirmoqchi bo'lgan miqdorni kiriting (raqam):")
+        bot.register_next_step_handler(msg, lambda m: process_sub_balance(m, user_id))
+
+    def process_sub_balance(message, user_id):
+        try:
+            amount = int(message.text.strip())
+            if amount <= 0:
+                bot.send_message(message.chat.id, "❌ Musbat raqam kiriting!")
+                return
+            
+            user = get_user(user_id)
+            if not user:
+                bot.send_message(message.chat.id, "❌ Foydalanuvchi topilmadi!")
+                return
+            
+            current_balance = user[3]
+            new_balance = max(0, current_balance - amount)
+            update_user(user_id, balance=new_balance)
+            
+            bot.send_message(message.chat.id, f"✅ {format_money(amount)} ayirildi!\n💰 Yangi balans: {format_money(new_balance)}")
+            bot.send_message(user_id, f"❌ Admin sizdan {format_money(amount)} ayirdi!\n💰 Yangi balansingiz: {format_money(new_balance)}")
+        except ValueError:
+            bot.send_message(message.chat.id, "❌ Faqat raqam kiriting!")
+        except Exception as e:
+            bot.send_message(message.chat.id, f"❌ Xato: {str(e)}")
+
+    @bot.callback_query_handler(func=lambda call: call.data.startswith('ban_user_'))
+    def handle_ban_user(call):
+        if call.from_user.id != admin_id:
+            bot.answer_callback_query(call.id, "❌ Sizga ruxsat yo'q!")
+            return
+        
+        user_id = int(call.data.split('_')[2])
+        
+        try:
+            conn = sqlite3.connect('pul_yutish.db')
+            cursor = conn.cursor()
+            
+            cursor.execute(
+                "INSERT OR REPLACE INTO blacklist (user_id, reason, added_date) VALUES (?, ?, ?)",
+                (user_id, "Admin tomonidan ban qilindi", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+            )
+            conn.commit()
+            conn.close()
+            
+            bot.answer_callback_query(call.id, "✅ Foydalanuvchi ban qilindi!")
+            bot.send_message(call.message.chat.id, f"✅ Foydalanuvchi ID {user_id} ban qilindi!")
+            bot.send_message(user_id, "🚫 Bot hozir ish faoliyatida emas. Keyinroq qayta urinib ko'ring.")
+        except Exception as e:
+            bot.answer_callback_query(call.id, f"❌ Xato: {str(e)}")
+            print(f"Ban user error: {e}")
+
+    @bot.callback_query_handler(func=lambda call: call.data.startswith('unban_user_'))
+    def handle_unban_user(call):
+        if call.from_user.id != admin_id:
+            bot.answer_callback_query(call.id, "❌ Sizga ruxsat yo'q!")
+            return
+        
+        user_id = int(call.data.split('_')[2])
+        
+        try:
+            conn = sqlite3.connect('pul_yutish.db')
+            cursor = conn.cursor()
+            
+            cursor.execute("DELETE FROM blacklist WHERE user_id=?", (user_id,))
+            conn.commit()
+            conn.close()
+            
+            bot.answer_callback_query(call.id, "✅ Foydalanuvchi banddan chiqarildi!")
+            bot.send_message(call.message.chat.id, f"✅ Foydalanuvchi ID {user_id} banddan chiqarildi!")
+            bot.send_message(user_id, "✅ Siz banddan chiqarildingiz! Endi botdan foydalanishingiz mumkin.")
+        except Exception as e:
+            bot.answer_callback_query(call.id, f"❌ Xato: {str(e)}")
+            print(f"Unban user error: {e}")
+
+    @bot.message_handler(func=lambda m: m.text == "🔓 Banddan chiqarish" and m.from_user.id == admin_id)
+    def handle_unban_menu(message):
+        msg = bot.send_message(
+            message.chat.id,
+            "👤 Band qilingan foydalanuvchi ID'sini kiriting:"
+        )
+        bot.register_next_step_handler(msg, process_unban_user)
+
+    def process_unban_user(message):
+        try:
+            user_id = int(message.text.strip())
+            conn = sqlite3.connect('pul_yutish.db')
+            cursor = conn.cursor()
+            
+            # Band qilinganligini tekshirish
+            cursor.execute("SELECT reason FROM blacklist WHERE user_id=?", (user_id,))
+            result = cursor.fetchone()
+            
+            if not result:
+                bot.send_message(message.chat.id, "❌ Bu foydalanuvchi band qilinmagan!")
+                conn.close()
+                return
+            
+            # Blacklistdan olib tashlash
+            cursor.execute("DELETE FROM blacklist WHERE user_id=?", (user_id,))
+            conn.commit()
+            conn.close()
+            
+            bot.send_message(message.chat.id, f"✅ Foydalanuvchi ID {user_id} banddan chiqarildi!")
+            bot.send_message(user_id, "✅ Siz banddan chiqarildingiz! Endi botdan foydalanishingiz mumkin.")
+        except ValueError:
+            bot.send_message(message.chat.id, "❌ Faqat raqam kiriting!")
+        except Exception as e:
+            bot.send_message(message.chat.id, f"❌ Xato: {str(e)}")
+
     def escape_markdown(text):
         """Escape special characters for Markdown."""
         escape_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
         for char in escape_chars:
             text = text.replace(char, f'\\{char}')
         return text
-
-
-
-    @bot.message_handler(func=lambda m: m.text == "🔄 Hisobni 0 qilish" and m.from_user.id == admin_id)
-    def handle_reset_user_balance(message):
-        keyboard = types.InlineKeyboardMarkup()
-        btn_cancel = types.InlineKeyboardButton("❌ Bekor qilish", callback_data="cancel_reset_input")
-        keyboard.add(btn_cancel)
-        
-        msg = bot.send_message(
-            message.chat.id,
-            "❗ Foydalanuvchi ID sini yuboring:",
-            reply_markup=keyboard
-        )
-        bot.register_next_step_handler(msg, process_reset_user_balance)
-
-    def process_reset_user_balance(message):
-        try:
-            # Check if cancel button was clicked
-            if message.text and message.text.startswith('/'):
-                return
-            
-            user_id = int(message.text.strip())
-            conn = sqlite3.connect('pul_yutish.db')
-            cursor = conn.cursor()
-
-            # Check if the user exists
-            cursor.execute("SELECT full_name, balance FROM users WHERE user_id=?", (user_id,))
-            user = cursor.fetchone()
-
-            if not user:
-                bot.send_message(
-                    message.chat.id,
-                    f"❌ Foydalanuvchi ID: {user_id} topilmadi."
-                )
-                conn.close()
-                return
-
-            full_name, current_balance = user
-            
-            # Inline tugmalar tasdiqlash uchun
-            keyboard = types.InlineKeyboardMarkup()
-            btn_confirm = types.InlineKeyboardButton("✅ Tasdiqlash", callback_data=f"confirm_reset_{user_id}")
-            btn_cancel = types.InlineKeyboardButton("❌ Bekor qilish", callback_data="cancel_reset")
-            keyboard.add(btn_confirm, btn_cancel)
-            
-            bot.send_message(
-                message.chat.id,
-                f"⚠️ *Hisobni 0 qilish tasdiqlash:*\n\n"
-                f"👤 Foydalanuvchi: {full_name}\n"
-                f"🆔 ID: {user_id}\n"
-                f"💰 Joriy balans: {format_money(current_balance)}\n"
-                f"🔄 Yangi balans: 0 so'm\n\n"
-                f"❗ Bu amalni bekor qilib bo'lmaydi!",
-                reply_markup=keyboard,
-                parse_mode="Markdown"
-            )
-            conn.close()
-            
-        except ValueError:
-            bot.send_message(
-                message.chat.id,
-                "❌ Noto'g'ri ID formati. Iltimos, faqat raqam kiriting."
-            )
-        except Exception as e:
-            bot.send_message(
-                message.chat.id,
-                f"❌ Xato yuz berdi: {str(e)}"
-            )
-
-    @bot.callback_query_handler(func=lambda call: call.data.startswith('confirm_reset_'))
-    def handle_confirm_reset(call):
-        if call.from_user.id != admin_id:
-            bot.answer_callback_query(call.id, "❌ Sizga ruxsat yo'q!")
-            return
-        
-        try:
-            user_id = int(call.data.split('_')[-1])
-            conn = sqlite3.connect('pul_yutish.db')
-            cursor = conn.cursor()
-            
-            # Reset user balance to 0
-            cursor.execute(
-                "UPDATE users SET balance=0 WHERE user_id=?",
-                (user_id,)
-            )
-            conn.commit()
-            conn.close()
-            
-            # Send notification to user
-            bot.send_message(
-                user_id,
-                f"⚠️ *Hisobingiz qayta tiklandi*\n\n"
-                f"💰 Balans: 0 so'm"
-            )
-            
-            # Notify admin
-            bot.edit_message_text(
-                chat_id=call.message.chat.id,
-                message_id=call.message.message_id,
-                text=f"✅ Foydalanuvchi ID: {user_id} ning hisobi 0 qilinidi!",
-                reply_markup=None
-            )
-            bot.answer_callback_query(call.id, "✅ Balans 0 qilinidi!")
-            
-        except Exception as e:
-            bot.answer_callback_query(call.id, f"❌ Xato: {str(e)}")
-            print(f"Reset balance error: {e}")
-
-    @bot.callback_query_handler(func=lambda call: call.data == "cancel_reset_input")
-    def handle_cancel_reset_input(call):
-        if call.from_user.id == admin_id:
-            bot.edit_message_text(
-                chat_id=call.message.chat.id,
-                message_id=call.message.message_id,
-                text="❌ Hisobni 0 qilish bekor qilindi.",
-                reply_markup=None
-            )
-            bot.answer_callback_query(call.id, "Bekor qilindi!")
-            bot.clear_step_handler_by_chat_id(call.message.chat.id)
-        else:
-            bot.answer_callback_query(call.id, "❌ Sizga ruxsat yo'q!")
-
-    @bot.callback_query_handler(func=lambda call: call.data == "cancel_reset")
-    def handle_cancel_reset(call):
-        if call.from_user.id == admin_id:
-            bot.edit_message_text(
-                chat_id=call.message.chat.id,
-                message_id=call.message.message_id,
-                text="❌ Hisobni 0 qilish bekor qilindi.",
-                reply_markup=None
-            )
-            bot.answer_callback_query(call.id, "Bekor qilindi!")
-        else:
-            bot.answer_callback_query(call.id, "❌ Sizga ruxsat yo'q!")
-
-    @bot.message_handler(func=lambda m: m.text == "🎁 Bonus berish" and m.from_user.id == admin_id)
-    def handle_give_bonus(message):
-        keyboard = types.InlineKeyboardMarkup()
-        btn_cancel = types.InlineKeyboardButton("❌ Bekor qilish", callback_data="cancel_bonus_input")
-        keyboard.add(btn_cancel)
-        
-        msg = bot.send_message(
-            message.chat.id,
-            "🎁 Bonus berish uchun quyidagi formatda ma'lumotlarni yuboring:\n\n"
-            "123456789\n"
-            "5\n\n"
-            "1-qator: Foydalanuvchi ID\n"
-            "2-qator: Bermoqchi bo'lgan aylantirish soni",
-            reply_markup=keyboard
-        )
-        bot.register_next_step_handler(msg, process_give_bonus)
-
-    def process_give_bonus(message):
-        try:
-            # Ma'lumotlarni ajratib olish
-            data = message.text.split('\n')
-            if len(data) < 2:
-                raise ValueError("Ma'lumotlar to'liq kiritilmagan")
-            
-            user_id = int(data[0].strip())
-            spins = int(data[1].strip())
-            
-            if spins <= 0:
-                raise ValueError("Aylantirish soni 0 dan katta bo'lishi kerak")
-
-            # Foydalanuvchi mavjudligini tekshirish
-            conn = sqlite3.connect('pul_yutish.db')
-            cursor = conn.cursor()
-            
-            cursor.execute("SELECT full_name, spins_left FROM users WHERE user_id=?", (user_id,))
-            result = cursor.fetchone()
-            
-            if not result:
-                bot.send_message(
-                    message.chat.id,
-                    f"❌ Foydalanuvchi ID: {user_id} topilmadi."
-                )
-                conn.close()
-                return
-            
-            full_name, current_spins = result
-            
-            # Inline tugmalar
-            keyboard = types.InlineKeyboardMarkup()
-            btn_confirm = types.InlineKeyboardButton("✅ Tasdiqlash", callback_data=f"confirm_bonus_{user_id}_{spins}")
-            btn_cancel = types.InlineKeyboardButton("❌ Bekor qilish", callback_data="cancel_bonus")
-            keyboard.add(btn_confirm, btn_cancel)
-            
-            bot.send_message(
-                message.chat.id,
-                f"🎁 *Bonus berish tasdiqlash:*\n\n"
-                f"👤 Foydalanuvchi: {full_name}\n"
-                f"🆔 ID: {user_id}\n"
-                f"🎡 Joriy aylantirish: {current_spins}\n"
-                f"➕ Bermoqchi bo'lgan bonus: {spins}\n"
-                f"📊 Jami bo'ladi: {current_spins + spins}",
-                reply_markup=keyboard,
-                parse_mode="Markdown"
-            )
-            conn.close()
-            
-        except ValueError as e:
-            bot.send_message(
-                message.chat.id,
-                f"❌ Xato: {str(e)}\n\n"
-                "Iltimos, ma'lumotlarni quyidagi formatda qayta yuboring:\n\n"
-                "123456789\n"
-                "5\n\n"
-                "1-qator: Foydalanuvchi ID (faqat raqamlar)\n"
-                "2-qator: Aylantirish soni (faqat raqamlar)"
-            )
-        except Exception as e:
-            bot.send_message(message.chat.id, f"❌ Xato yuz berdi: {str(e)}")
-
-    @bot.callback_query_handler(func=lambda call: call.data.startswith('confirm_bonus_'))
-    def handle_confirm_bonus(call):
-        if call.from_user.id != admin_id:
-            bot.answer_callback_query(call.id, "❌ Sizga ruxsat yo'q!")
-            return
-        
-        try:
-            # callback_data dan user_id va spins ni olish
-            parts = call.data.split('_')
-            user_id = int(parts[2])
-            spins = int(parts[3])
-            
-            conn = sqlite3.connect('pul_yutish.db')
-            cursor = conn.cursor()
-            
-            # Foydalanuvchiga aylantirish qo'shish
-            cursor.execute(
-                "UPDATE users SET spins_left=spins_left+? WHERE user_id=?",
-                (spins, user_id)
-            )
-            conn.commit()
-            
-            # Foydalanuvchiga xabar yuborish
-            bot.send_message(
-                user_id,
-                f"🎁 *Siz bonus oldingiz!*\n\n"
-                f"➕ {spins} ta aylantirish imkoniyati qo'shildi!\n"
-                f"💎 Bonusdan foydalaning va pul ishlashda davom eting!",
-                parse_mode="Markdown"
-            )
-            
-            conn.close()
-            
-            # Adminni xabardor qilish
-            bot.edit_message_text(
-                chat_id=call.message.chat.id,
-                message_id=call.message.message_id,
-                text=f"✅ Foydalanuvchi ID: {user_id} ga {spins} ta aylantirish bonus berildi!\n"
-                     f"📨 Foydalanuvchiga xabar yuborildi.",
-                reply_markup=None
-            )
-            bot.answer_callback_query(call.id, "✅ Bonus muvaffaqiyatli berildi!")
-            
-        except Exception as e:
-            bot.answer_callback_query(call.id, f"❌ Xato: {str(e)}")
-            print(f"Bonus confirmation error: {e}")
-
-    @bot.callback_query_handler(func=lambda call: call.data == "cancel_bonus_input")
-    def handle_cancel_bonus_input(call):
-        if call.from_user.id == admin_id:
-            bot.edit_message_text(
-                chat_id=call.message.chat.id,
-                message_id=call.message.message_id,
-                text="❌ Bonus berish bekor qilindi.",
-                reply_markup=None
-            )
-            bot.answer_callback_query(call.id, "Bekor qilindi!")
-            # Next step handler ni to'xtatish
-            bot.clear_step_handler_by_chat_id(call.message.chat.id)
-        else:
-            bot.answer_callback_query(call.id, "❌ Sizga ruxsat yo'q!")
-
-    @bot.callback_query_handler(func=lambda call: call.data == "cancel_bonus")
-    def handle_cancel_bonus(call):
-        if call.from_user.id == admin_id:
-            bot.edit_message_text(
-                chat_id=call.message.chat.id,
-                message_id=call.message.message_id,
-                text="❌ Bonus berish bekor qilindi.",
-                reply_markup=None
-            )
-            bot.answer_callback_query(call.id, "Bekor qilindi!")
-        else:
-            bot.answer_callback_query(call.id, "❌ Sizga ruxsat yo'q!")
-
-    @bot.message_handler(func=lambda m: m.text == "➕ Kanalni aktivlashtirish" and m.from_user.id == admin_id)
-    def handle_activate_channel(message):
-        try:
-            bot_info = bot.get_me()
-            bot_username = bot_info.username
-            
-            keyboard = types.InlineKeyboardMarkup()
-            btn_add = types.InlineKeyboardButton(
-                "➕ Bot'ni qo'shish",
-                url=f"https://t.me/{bot_username}?startchannel=true&admin=post_messages+manage_topics"
-            )
-            keyboard.add(btn_add)
-            
-            bot.send_message(
-                message.chat.id,
-                "🔗 Bot'ni kanalga qo'shish uchun quyidagi tugmani bosing:\n\n"
-                "❗ Bot'ni admin qilib qo'shishni unutmang!",
-                reply_markup=keyboard
-            )
-        except Exception as e:
-            bot.send_message(
-                message.chat.id,
-                f"❌ Xato yuz berdi: {str(e)}"
-            )

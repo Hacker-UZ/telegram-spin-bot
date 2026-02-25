@@ -4,7 +4,27 @@ import sqlite3
 from config import INITIAL_SPINS, MIN_WITHDRAWAL, ADMIN_ID, PRIZES_LOW_BALANCE, PRIZES_HIGH_BALANCE, REFERAL_SPINS
 import random
 
-def setup_user_handlers(bot):
+def setup_user_handlers(bot_instance):
+    bot = bot_instance
+    
+    def is_user_banned(user_id):
+        """Foydalanuvchi ban qilinganligini tekshirish"""
+        conn = sqlite3.connect('pul_yutish.db')
+        cursor = conn.cursor()
+        cursor.execute("SELECT user_id FROM blacklist WHERE user_id=?", (user_id,))
+        result = cursor.fetchone()
+        conn.close()
+        return result is not None
+
+    # Ban qilingan foydalanuvchilar uchun middleware
+    @bot.message_handler(func=lambda m: is_user_banned(m.from_user.id))
+    def block_banned_user_messages(message):
+        bot.send_message(message.chat.id, "🚫 Bot hozir ish faoliyatida emas. Keyinroq qayta urinib ko'ring.")
+
+    @bot.callback_query_handler(func=lambda call: is_user_banned(call.from_user.id))
+    def block_banned_user_callbacks(call):
+        bot.answer_callback_query(call.id, "🚫 Bot hozir ish faoliyatida emas.")
+
     def extract_channel_id(channel_link):
         """Link'dan channel_id ni ajratib olish"""
         if channel_link.startswith("@"):
@@ -113,6 +133,10 @@ def setup_user_handlers(bot):
 
     @bot.message_handler(commands=['start'])
     def handle_start(message):
+        if is_user_banned(message.from_user.id):
+            bot.send_message(message.from_user.id, "🚫 Bot hozir ish faoliyatida emas. Keyinroq qayta urinib ko'ring.")
+            return
+        
         try:
             user_id = message.from_user.id
 
@@ -660,6 +684,4 @@ def setup_user_handlers(bot):
         except Exception as e:
             print(f"Error in handle_referal: {e}")
             bot.send_message(message.chat.id, "❌ Xato yuz berdi. Iltimos, qayta urinib ko'ring.")
-
-
 
