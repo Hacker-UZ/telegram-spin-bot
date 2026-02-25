@@ -444,17 +444,17 @@ def setup_admin_handlers(bot_instance, admin_id):
             is_banned = cursor.fetchone() is not None
             
             conn.close()
-            
+            text = "🚫 *BAN QILINDI*" if is_banned else "✅ *FAOL*"
             info = (
                 f"👤 *Foydalanuvchi ma'lumotlari:*\n\n"
                 f"🆔 ID: `{user_id_db}`\n"
-                f"👤 Ism: {full_name or 'Noma\'lum'}\n"
-                f"📱 Username: @{username or 'Noma\'lum'}\n"
-                f"📞 Telefon: {phone_number or 'Noma\'lum'}\n"
+                f"👤 Ism: {full_name or 'None'}\n"
+                f"📱 Username: @{username or 'None'}\n"
+                f"📞 Telefon: {phone_number or 'None'}\n"
                 f"👥 Referallar: {referals_count}\n"
                 f"💰 Balans: {format_money(balance)}\n"
                 f"🎡 Aylantirishlar: {spins_left}\n"
-                f"""{"🚫 *BAN QILINDI*" if is_banned else "✅ FAOL"}""")
+                f"{text}")
             
             keyboard = types.InlineKeyboardMarkup()
             keyboard.row(
