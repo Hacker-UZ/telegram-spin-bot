@@ -454,7 +454,7 @@ def setup_admin_handlers(bot_instance, admin_id):
                 f"👥 Referallar: {referals_count}\n"
                 f"💰 Balans: {format_money(balance)}\n"
                 f"🎡 Aylantirishlar: {spins_left}\n"
-                f"{'🚫 *BAN QILINDI*' if is_banned else '✅ *FAOL*'}")
+                f"""{"🚫 *BAN QILINDI*" if is_banned else "✅ FAOL"}""")
             
             keyboard = types.InlineKeyboardMarkup()
             keyboard.row(
