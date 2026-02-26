@@ -2,6 +2,7 @@ from telebot import types
 from datetime import datetime
 import sqlite3
 from config import INITIAL_SPINS, MIN_WITHDRAWAL, ADMIN_ID, PRIZES_LOW_BALANCE, PRIZES_HIGH_BALANCE, REFERAL_SPINS
+from database import get_referal_by_referee
 import random
 
 def setup_user_handlers(bot_instance):
@@ -56,6 +57,8 @@ def setup_user_handlers(bot_instance):
             return True  # No channels to check
 
         unsubscribed = []
+        subscribed = []
+        
         for channel_id, channel_name in channels:
             try:
                 # Private kanal invite link'larini tekshirvdan o'tkazish
@@ -75,20 +78,19 @@ def setup_user_handlers(bot_instance):
                 try:
                     member = bot.get_chat_member(api_channel_id, user_id)
                     if member.status not in ['member', 'administrator', 'creator']:
-                        unsubscribed.append((channel_id, channel_name))
+                        unsubscribed.append(channel_id)
+                    else:
+                        subscribed.append(channel_id)
                 except:
                     # Agar tekshirish xatosi bo'lsa, subscribe qilinmagan deb hisob qil
-                    unsubscribed.append((channel_id, channel_name))
+                    unsubscribed.append(channel_id)
             except Exception as e:
                 print(f"Error checking subscription for channel {channel_id}: {e}")
-                unsubscribed.append((channel_id, channel_name))
+                unsubscribed.append(channel_id)
 
-        if unsubscribed:
-            conn.close()
-            return False
-
+        conn.commit()
         conn.close()
-        return True
+        return len(unsubscribed) == 0
 
     def referral_logic(bot, message, user_id):
         conn = sqlite3.connect('pul_yutish.db')
@@ -399,6 +401,9 @@ def setup_user_handlers(bot_instance):
                             f"Sizga *{REFERAL_SPINS}* aylantirish imkoniyati berildi!",
                             parse_mode="Markdown"
                         )
+                    
+                    # YANGI XUSUSIYAT: Kanal obunasi uchun bonus (OLIB TASHLANDI)
+                    # Faqat jarima qismi qoldi - unsubscribe bo'lganda
                 
                 conn.close()
                 
@@ -520,11 +525,18 @@ def setup_user_handlers(bot_instance):
 
             bot.send_message(
                 message.chat.id,
-                "🎰 Baraban aylantirishga tayyor!",
-                reply_markup=keyboard
+                "🎰 *Baraban aylantirishga tayyor!*\n\n",
+                reply_markup=keyboard,
+                parse_mode="Markdown"
             )
         except Exception as e:
-            bot.send_message(message.chat.id, f"❌ Xato yuz berdi: {str(e)}")
+            print(f"Spin request error: {e}")
+            bot.send_message(
+                message.chat.id, 
+                "❌ *Xato yuz berdi!*\n"
+                "Iltimos, qayta urinib ko'ring yoki admin'ga murojaat qiling.",
+                parse_mode="Markdown"
+            )
 
     @bot.callback_query_handler(func=lambda call: call.data == "spin")
     def handle_spin(call):
@@ -538,16 +550,17 @@ def setup_user_handlers(bot_instance):
             result = cursor.fetchone()
 
             if not result:
-                bot.answer_callback_query(call.id, "❌ Foydalanuvchi topilmadi!")
+                bot.answer_callback_query(call.id, "❌ Foydalanuvchi topilmadi!", show_alert=True)
                 return
 
             spins_left, balance = result
 
             if spins_left <= 0:
-                bot.answer_callback_query(call.id, "❌ Sizda aylantirish imkoniyati qolmadi!")
+                bot.answer_callback_query(call.id, "❌ Aylantirish imkoniyati qolmadi!", show_alert=True)
                 bot.send_message(call.message.chat.id,
-                    "❌ Sizda aylantirish imkoniyati qolmadi!\n\n"
-                    "👥 Do'stlaringizni taklif qilib, yana 1ta aylantirish imkoniyatini oling!\n",
+                    "❌ *Aylantirish imkoniyati qolmadi!*\n\n"
+                    "👥 Do'stlaringizni taklif qilib, yana aylantirish imkoniyatini oling!\n\n"
+                    "_Har bir taklif qilingan do'st = 1 aylantirish_",
                     parse_mode="Markdown"
                 )
                 return
@@ -556,7 +569,7 @@ def setup_user_handlers(bot_instance):
             bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
 
             # Wait for 2 seconds before showing the prize
-            bot.answer_callback_query(call.id, "🎡 Aylantirilyapti...")
+            bot.answer_callback_query(call.id, "🎡 Aylantirilyapti...", show_alert=False)
             import time
             time.sleep(1.2)
 
@@ -584,23 +597,30 @@ def setup_user_handlers(bot_instance):
             if prize == 0:
                 bot.send_message(
                     call.message.chat.id,
-                    f"😔 Afsuski, siz bu safar yutmadingiz!\n\n"
+                    f"😔 *Afsuski, siz bu safar yutmadingiz!*\n\n"
                     f"💵 Balans: {new_balance:,} so'm\n"
-                    f"🎡 Qolgan aylantirishlar: {new_spins}",
+                    f"🎡 Qolgan aylantirishlar: {new_spins}\n\n",
                     parse_mode="Markdown"
                 )
             else:
                 bot.send_message(
                     call.message.chat.id,
-                    f"🎉 Tabriklaymiz! Siz yutdingiz: *{prize:,} so'm*!\n\n"
+                    f"🎉 *Tabriklaymiz! Siz yutdingiz!*\n\n"
+                    f"💰 *{prize:,} so'm*\n\n"
                     f"💵 Yangi balans: {new_balance:,} so'm\n"
                     f"🎡 Qolgan aylantirishlar: {new_spins}",
                     parse_mode="Markdown"
                 )
         except Exception as e:
-            bot.send_message(call.message.chat.id, f"❌ Xato yuz berdi: {str(e)}")
+            print(f"Spin error: {e}")
+            bot.send_message(call.message.chat.id, 
+                f"❌ *Xato yuz berdi!*\n"
+                f"_Xato: {str(e)}_",
+                parse_mode="Markdown"
+            )
         finally:
-            conn.close()
+            if 'conn' in locals():
+                conn.close()
 
     @bot.message_handler(func=lambda m: m.text == "📊 Hisobim")
     def handle_account_info(message):
@@ -630,15 +650,15 @@ def setup_user_handlers(bot_instance):
 
             # Prepare the account information message
             account_info = (
-                f"📊 *Sizning hisobingiz:*\n\n"
-                f"🆔 ID raqamingiz: {user_id}\n"
-                f"💵 Balans: {balance:,} so'm\n"
-                f"🎡 Aylantirish imkoniyati: {spins_left}\n"
-                f"👥 Referallar soni: {referral_count}\n\n"
-                f"🎯 Minimal pul yechish: {MIN_WITHDRAWAL} so'm"
+                f"📊 *Sizning hisobingiz*\n\n"
+                f"🆔 ID: `{user_id}`\n"
+                f"💵 Balans: *{balance:,} so'm*\n"
+                f"🎡 Aylantirish: *{spins_left}*\n"
+                f"👥 Referallar: *{referral_count}*\n\n"
+                f"💳 Minimal yechish: {MIN_WITHDRAWAL:,} so'm"
             )
 
-             # Add an inline button for withdrawal
+            # Add an inline button for withdrawal
             keyboard = types.InlineKeyboardMarkup()
             withdraw_button = types.InlineKeyboardButton(
                 text="💸 Pul yechish", callback_data="withdraw"
@@ -653,7 +673,13 @@ def setup_user_handlers(bot_instance):
                 reply_markup=keyboard
             )
         except Exception as e:
-            bot.send_message(message.chat.id, f"❌ Xato yuz berdi: {str(e)}")
+            print(f"Account info error: {e}")
+            bot.send_message(
+                message.chat.id, 
+                "❌ *Xato yuz berdi!*\n"
+                "Iltimos, qayta urinib ko'ring.",
+                parse_mode="Markdown"
+            )
 
     @bot.message_handler(func=lambda m: m.text == "👥 Do'stlarni taklif qilish")
     def handle_referal(message):

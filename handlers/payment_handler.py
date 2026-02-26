@@ -2,7 +2,7 @@ from telebot import types
 from config import MIN_WITHDRAWAL, CURRENCY
 from database import get_user, update_user
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 def format_money(amount):
@@ -12,33 +12,55 @@ def setup_payment_handler(bot, admin_id):
     @bot.callback_query_handler(func=lambda call: call.data == "withdraw")
     def handle_withdraw(call):
         user_id = call.from_user.id
-        conn = sqlite3.connect('pul_yutish.db')
-        cursor = conn.cursor()
-        cursor.execute("SELECT balance, phone_number FROM users WHERE user_id=?", (user_id,))
-        result = cursor.fetchone()
-        conn.close()
-        
-        if not result:
-            bot.send_message(call.message.chat.id, "❌ Foydalanuvchi topilmadi!")
-            return
-        
-        balance, phone_number = result
+        conn = None
+        try:
+            conn = sqlite3.connect('pul_yutish.db')
+            cursor = conn.cursor()
+            cursor.execute("SELECT balance, phone_number, last_withdrawal FROM users WHERE user_id=?", (user_id,))
+            result = cursor.fetchone()
+            
+            if not result:
+                bot.send_message(call.message.chat.id, "❌ Foydalanuvchi topilmadi!")
+                return
+            
+            balance, phone_number, last_withdrawal = result
+            
+            # 7-kun tekshirish
+            if last_withdrawal:
+                last_withdraw_date = datetime.strptime(last_withdrawal, "%Y-%m-%d %H:%M:%S")
+                current_date = datetime.now(ZoneInfo("Asia/Tashkent")).replace(tzinfo=None)
+                days_passed = (current_date - last_withdraw_date).days
+                
+                if days_passed < 7:
+                    remaining_days = 7 - days_passed
+                    bot.send_message(
+                        call.message.chat.id,
+                        f"⏳ Kechirasiz! Siz oxirgi pul yechishdan so'ng {days_passed} kun o'tdi.\n"
+                        f"Yana {remaining_days} kun o'tgandan keyin pul yechishingiz mumkin."
+                    )
+                    return
 
-        if balance < MIN_WITHDRAWAL:
-            bot.send_message(
-                call.message.chat.id,
-                f"❌ Minimal pul yechish miqdori {format_money(MIN_WITHDRAWAL)}\n"
-                f"Sizning balansingiz: {format_money(balance)}"
-            )
-            return
+            if balance < MIN_WITHDRAWAL:
+                bot.send_message(
+                    call.message.chat.id,
+                    f"❌ Minimal pul yechish miqdori {format_money(MIN_WITHDRAWAL)}\n"
+                    f"Sizning balansingiz: {format_money(balance)}"
+                )
+                return
 
-        # Agar telefon raqami yo'q bo'lsa, avval so'raymiz
-        if not phone_number:
-            request_phone_number(call.message)
-            return
+            # Agar telefon raqami yo'q bo'lsa, avval so'raymiz
+            if not phone_number:
+                request_phone_number(call.message)
+                return
 
-        # Telefon raqami bor bo'lsa, karta ma'lumotlarini so'raymiz
-        proceed_to_payment_info(call.message, user_id, balance)
+            # Telefon raqami bor bo'lsa, karta ma'lumotlarini so'raymiz
+            proceed_to_payment_info(call.message, user_id, balance)
+        except Exception as e:
+            print(f"Withdraw error: {e}")
+            bot.send_message(call.message.chat.id, "❌ Xato yuz berdi. Qayta urinib ko'ring.")
+        finally:
+            if conn:
+                conn.close()
 
     def process_payment_info(message, user_id, amount):
         try:
@@ -58,14 +80,15 @@ def setup_payment_handler(bot, admin_id):
             conn = sqlite3.connect('pul_yutish.db')
             cursor = conn.cursor()
             
+            current_time = datetime.now(ZoneInfo("Asia/Tashkent")).strftime("%Y-%m-%d %H:%M:%S")
+            
             cursor.execute('''INSERT INTO payments 
                             (user_id, card_number, card_holder, amount, request_date)
                             VALUES (?, ?, ?, ?, ?)''',
-                         (user_id, card_number, card_holder, amount, 
-                          datetime.now(ZoneInfo("Asia/Tashkent")).strftime("%Y-%m-%d %H:%M:%S")))
+                         (user_id, card_number, card_holder, amount, current_time))
             
-            # Balansni yangilash
-            cursor.execute("UPDATE users SET balance=0 WHERE user_id=?", (user_id,))
+            # Balansni yangilash va oxirgi pul yechish vaqtini saqlash
+            cursor.execute("UPDATE users SET balance=0, last_withdrawal=? WHERE user_id=?", (current_time, user_id))
             
             conn.commit()
             conn.close()
@@ -74,7 +97,7 @@ def setup_payment_handler(bot, admin_id):
             bot.send_message(
                 message.chat.id,
                 f"✅ {format_money(amount)} miqdordagi to'lov so'rovingiz qabul qilindi!\n"
-                "Adminlarimiz 24 soat ichida to'lovni amalga oshiradilar.\n\n"
+                "Adminlarimiz tez orada to'lovni amalga oshiradilar.\n\n"
                 f"💳 Karta raqami: {card_number[:4]} **** **** {card_number[-4:]}\n"
                 f"👤 Karta egasi: {card_holder}"
             )
@@ -145,15 +168,17 @@ def setup_payment_handler(bot, admin_id):
                 conn.close()
                 return
 
+            current_time = datetime.now(ZoneInfo('Asia/Tashkent')).strftime("%Y-%m-%d %H:%M:%S")
+            
             # Insert withdrawal request into the database
             cursor.execute(
                 """INSERT INTO payments (user_id, card_number, amount, request_date, status)
                    VALUES (?, ?, ?, ?, ?)""",
-                (user_id, card_number, balance, datetime.now(ZoneInfo('Asia/Tashkent')).strftime("%Y-%m-%d %H:%M:%S"), 'pending')
+                (user_id, card_number, balance, current_time, 'pending')
             )
 
-            # Reset user balance
-            cursor.execute("UPDATE users SET balance=0 WHERE user_id=?", (user_id,))
+            # Reset user balance and update last_withdrawal
+            cursor.execute("UPDATE users SET balance=0, last_withdrawal=? WHERE user_id=?", (current_time, user_id))
             conn.commit()
             conn.close()
 
@@ -161,7 +186,7 @@ def setup_payment_handler(bot, admin_id):
             bot.send_message(
                 message.chat.id,
                 f"✅ {balance:,} so'm miqdordagi to'lov so'rovingiz qabul qilindi!\n"
-                "Adminlarimiz 24 soat ichida to'lovni amalga oshiradilar.\n\n"
+                "Adminlarimiz tez orada to'lovni amalga oshiradilar.\n\n"
                 f"💳 Karta raqami: {card_number[:4]} **** **** {card_number[-4:]}"
             )
 
@@ -177,13 +202,35 @@ def setup_payment_handler(bot, admin_id):
     @bot.message_handler(func=lambda m: m.text == "💸 Pul yechish")
     def handle_withdrawal_request(message):
         user_id = message.from_user.id
-        conn = sqlite3.connect('pul_yutish.db')
-        cursor = conn.cursor()
-
+        conn = None
         try:
-            # Check if the user has a phone number
-            cursor.execute("SELECT phone_number FROM users WHERE user_id=?", (user_id,))
-            phone_number = cursor.fetchone()[0]
+            conn = sqlite3.connect('pul_yutish.db')
+            cursor = conn.cursor()
+
+            # Check if the user has a phone number and get last_withdrawal
+            cursor.execute("SELECT phone_number, last_withdrawal FROM users WHERE user_id=?", (user_id,))
+            result = cursor.fetchone()
+            
+            if not result:
+                bot.send_message(message.chat.id, "❌ Foydalanuvchi topilmadi!")
+                return
+            
+            phone_number, last_withdrawal = result
+            
+            # 7-kun tekshirish
+            if last_withdrawal:
+                last_withdraw_date = datetime.strptime(last_withdrawal, "%Y-%m-%d %H:%M:%S")
+                current_date = datetime.now(ZoneInfo("Asia/Tashkent")).replace(tzinfo=None)
+                days_passed = (current_date - last_withdraw_date).days
+                
+                if days_passed < 7:
+                    remaining_days = 7 - days_passed
+                    bot.send_message(
+                        message.chat.id,
+                        f"⏳ Kechirasiz! Siz oxirgi pul yechishdan so'ng {days_passed} kun o'tdi.\n"
+                        f"Yana {remaining_days} kun o'tgandan keyin pul yechishingiz mumkin."
+                    )
+                    return
 
             if not phone_number:
                 # Request phone number if not provided
@@ -197,7 +244,7 @@ def setup_payment_handler(bot, admin_id):
             if balance < MIN_WITHDRAWAL:
                 bot.send_message(
                     message.chat.id,
-                    f"❌ Pul yechish uchun minimal balans: {MIN_WITHDRAWAL:,} so'm."
+                    f"❌ Pul yechish uchun minimal balans: {format_money(MIN_WITHDRAWAL)}."
                 )
                 return
 
@@ -207,9 +254,11 @@ def setup_payment_handler(bot, admin_id):
             )
             bot.register_next_step_handler(msg, process_withdrawal_request)
         except Exception as e:
-            bot.send_message(message.chat.id, f"❌ Xato yuz berdi: {str(e)}")
+            print(f"Withdrawal request error: {e}")
+            bot.send_message(message.chat.id, "❌ Xato yuz berdi. Qayta urinib ko'ring.")
         finally:
-            conn.close()
+            if conn:
+                conn.close()
 
     def request_phone_number(message):
         keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)

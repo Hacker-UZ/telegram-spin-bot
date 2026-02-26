@@ -76,29 +76,41 @@ def init_db():
         )
     ''')
 
-    # Add phone_number column to users table if it doesn't exist
+    # Check and add missing columns to users table
     cursor.execute("PRAGMA table_info(users)")
-    columns = [column[1] for column in cursor.fetchall()]
+    columns = {column[1] for column in cursor.fetchall()}
+    
     if "phone_number" not in columns:
         cursor.execute("ALTER TABLE users ADD COLUMN phone_number TEXT")
-
-    # Add bonus_given column to users table if it doesn't exist
-    cursor.execute("PRAGMA table_info(users)")
-    columns = [column[1] for column in cursor.fetchall()]
     if "bonus_given" not in columns:
         cursor.execute("ALTER TABLE users ADD COLUMN bonus_given INTEGER DEFAULT 0")
-
-    # Add bonus_given column to referals table if it doesn't exist
-    cursor.execute("PRAGMA table_info(referals)")
-    columns = [column[1] for column in cursor.fetchall()]
-    if "bonus_given" not in columns:
-        cursor.execute("ALTER TABLE referals ADD COLUMN bonus_given INTEGER DEFAULT 0")
-
-    # Add created_at column to users table if it doesn't exist
-    cursor.execute("PRAGMA table_info(users)")
-    columns = [column[1] for column in cursor.fetchall()]
     if "created_at" not in columns:
         cursor.execute("ALTER TABLE users ADD COLUMN created_at TEXT")
+    if "last_withdrawal" not in columns:
+        cursor.execute("ALTER TABLE users ADD COLUMN last_withdrawal TEXT")
+
+    # Check and add missing columns to referals table
+    cursor.execute("PRAGMA table_info(referals)")
+    ref_columns = {column[1] for column in cursor.fetchall()}
+    
+    if "bonus_given" not in ref_columns:
+        cursor.execute("ALTER TABLE referals ADD COLUMN bonus_given INTEGER DEFAULT 0")
+    if "channel_bonus_given" not in ref_columns:
+        cursor.execute("ALTER TABLE referals ADD COLUMN channel_bonus_given INTEGER DEFAULT 0")
+
+    # Kanal subscription historian jadvali (Referal bonuslar uchun)
+    cursor.execute('''CREATE TABLE IF NOT EXISTS referal_channel_activity
+                     (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                     referer_id INTEGER,
+                     referee_id INTEGER,
+                     channel_id TEXT,
+                     action TEXT,
+                     amount_deducted INTEGER DEFAULT 0,
+                     action_date TEXT,
+                     subscription_date TEXT,
+                     FOREIGN KEY(referer_id) REFERENCES users(user_id),
+                     FOREIGN KEY(referee_id) REFERENCES users(user_id),
+                     FOREIGN KEY(channel_id) REFERENCES channels(channel_id))''')
 
     # Qora ro'yxat jadvali
     cursor.execute('''CREATE TABLE IF NOT EXISTS blacklist
@@ -181,3 +193,13 @@ def add_prize(user_id, amount):
     
     conn.commit()
     conn.close()
+
+def get_referal_by_referee(referee_id):
+    """Referee ID'siga qarab referer ID'sini olish"""
+    conn = sqlite3.connect('pul_yutish.db')
+    cursor = conn.cursor()
+    cursor.execute("SELECT referer_id, bonus_given, channel_bonus_given FROM referals WHERE referee_id=?", (referee_id,))
+    result = cursor.fetchone()
+    conn.close()
+    return result
+

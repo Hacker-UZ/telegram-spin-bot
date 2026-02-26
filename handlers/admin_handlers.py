@@ -6,7 +6,7 @@ import os
 import threading
 import time
 import xlsxwriter
-from config import MIN_WITHDRAWAL, INITIAL_SPINS, REFERAL_SPINS, PRIZES, ADMIN_ID
+from config import MIN_WITHDRAWAL, INITIAL_SPINS, REFERAL_SPINS, PRIZES, ADMIN_ID, REFERAL_CHANNEL_DEDUCTION
 from .admin_stats import setup_admin_stats
 from .admin_channels import setup_admin_channels
 from database import get_user, update_user
@@ -149,7 +149,7 @@ def setup_admin_handlers(bot_instance, admin_id):
                 
                 # Adminga isbot xabari yuborish
                 proof_message = (
-                    f"✅ To'lov tasdiqlandi\n\n"
+                    f"✅ Muvaffaqiyatli to'landi\n\n"
                     f"👤 Foydalanuvchi: @{username}\n"
                     f"📝 Ism: {full_name}\n"
                     f"🆔 ID: {user_id}\n"
@@ -444,10 +444,10 @@ def setup_admin_handlers(bot_instance, admin_id):
             is_banned = cursor.fetchone() is not None
             
             conn.close()
-            text = "🚫 *BAN QILINDI*" if is_banned else "✅ *FAOL*"
+            text = "🚫 BAN QILINDI" if is_banned else "✅ FAOL"
             info = (
-                f"👤 *Foydalanuvchi ma'lumotlari:*\n\n"
-                f"🆔 ID: `{user_id_db}`\n"
+                f"👤 Foydalanuvchi ma'lumotlari:\n\n"
+                f"🆔 ID: {user_id_db}\n"
                 f"👤 Ism: {full_name or 'None'}\n"
                 f"📱 Username: @{username or 'None'}\n"
                 f"📞 Telefon: {phone_number or 'None'}\n"
@@ -468,7 +468,7 @@ def setup_admin_handlers(bot_instance, admin_id):
             else:
                 keyboard.add(types.InlineKeyboardButton("🚫 Ban qilish", callback_data=f"ban_user_{user_id_db}"))
             
-            bot.send_message(message.chat.id, info, parse_mode="Markdown", reply_markup=keyboard)
+            bot.send_message(message.chat.id, info, reply_markup=keyboard)
         except ValueError:
             bot.send_message(message.chat.id, "❌ Faqat raqam kiriting!")
         except Exception as e:
