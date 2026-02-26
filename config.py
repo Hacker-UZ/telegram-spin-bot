@@ -1,8 +1,7 @@
 import os
 
 ADMIN_ID = 7724497080 
-# BOT_TOKEN = os.environ.get('BOT_TOKEN')
-BOT_TOKEN = "6762980475:AAFwweK4Zy-1EhPsYBFT_Hf68SHa_UItqVw"
+BOT_TOKEN = os.environ.get('BOT_TOKEN')
 CURRENCY = "so'm"
 MIN_WITHDRAWAL = 5000
 
