@@ -101,7 +101,9 @@ def setup_admin_handlers(bot_instance, admin_id):
             keyboard = types.InlineKeyboardMarkup()
             btn_confirm = types.InlineKeyboardButton("✅ Tasdiqlash", callback_data=f"confirm_pay_{req_id}")
             btn_reject = types.InlineKeyboardButton("❌ Rad etish", callback_data=f"reject_pay_{req_id}")
+            btn_delete = types.InlineKeyboardButton("🗑️ O'chirish", callback_data=f"delete_pay_{req_id}")
             keyboard.add(btn_confirm, btn_reject)
+            keyboard.add(btn_delete)
 
             bot.send_message(
                 message.chat.id,
@@ -117,7 +119,7 @@ def setup_admin_handlers(bot_instance, admin_id):
 
 
 
-    @bot.callback_query_handler(func=lambda call: call.data.startswith(('confirm_pay_', 'reject_pay_')))
+    @bot.callback_query_handler(func=lambda call: call.data.startswith(('confirm_pay_', 'reject_pay_', 'delete_pay_')))
     def handle_payment_decision(call):
         if call.from_user.id != admin_id:
             bot.answer_callback_query(call.id, "❌ Sizga ruxsat yo'q!")
@@ -137,6 +139,19 @@ def setup_admin_handlers(bot_instance, admin_id):
                 return
 
             user_id, amount = result
+
+            # O'chirish (hech qanday xabar salmay)
+            if call.data.startswith('delete_pay_'):
+                cursor.execute("DELETE FROM payments WHERE id=?", (req_id,))
+                conn.commit()
+                bot.answer_callback_query(call.id, "🗑️ So'rov o'chirildi!")
+                bot.edit_message_text(
+                    chat_id=call.message.chat.id,
+                    message_id=call.message.message_id,
+                    text=f"{call.message.text}\n\n🔹 Status: 🗑️ O'chirilgan",
+                    reply_markup=None
+                )
+                return
 
             if call.data.startswith('confirm_pay_'):
                 cursor.execute("UPDATE payments SET status='completed' WHERE id=?", (req_id,))
